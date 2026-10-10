@@ -117,13 +117,20 @@ pub fn fix_executables<P: AsRef<Path>>(root: P) -> usize {
                         if !real_path.exists() {
                             if std::fs::rename(&path, &real_path).is_ok() {
                                 if std::fs::write(&path, LAUNCHER_HELPER).is_ok() {
-                                    let mut p = std::fs::metadata(&path).unwrap().permissions();
-                                    p.set_mode(0o755);
-                                    let _ = std::fs::set_permissions(&path, p);
-                                    let mut rp = std::fs::metadata(&real_path).unwrap().permissions();
-                                    rp.set_mode(0o755);
-                                    let _ = std::fs::set_permissions(&real_path, rp);
+                                    if let Ok(meta) = std::fs::metadata(&path) {
+                                        let mut p = meta.permissions();
+                                        p.set_mode(0o755);
+                                        let _ = std::fs::set_permissions(&path, p);
+                                    }
+                                    if let Ok(rmeta) = std::fs::metadata(&real_path) {
+                                        let mut rp = rmeta.permissions();
+                                        rp.set_mode(0o755);
+                                        let _ = std::fs::set_permissions(&real_path, rp);
+                                    }
                                     *fixed += 1;
+                                } else {
+                                    // Ripristino atomico in caso di errore di scrittura
+                                    let _ = std::fs::rename(&real_path, &path);
                                 }
                             }
                         }

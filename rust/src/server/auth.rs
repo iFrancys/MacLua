@@ -78,6 +78,17 @@ pub fn cors_layer() -> CorsLayer {
         ])
 }
 
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Axum middleware checking `X-MacLua-Token` header.
 pub async fn auth_middleware(req: Request, next: Next) -> Response {
     let path = req.uri().path();
@@ -91,7 +102,7 @@ pub async fn auth_middleware(req: Request, next: Next) -> Response {
     // Check header
     if let Some(token_header) = req.headers().get("X-MacLua-Token") {
         if let Ok(token_str) = token_header.to_str() {
-            if token_str == expected {
+            if constant_time_eq(token_str, &expected) {
                 return next.run(req).await;
             }
         }
@@ -101,7 +112,7 @@ pub async fn auth_middleware(req: Request, next: Next) -> Response {
     if let Some(query) = req.uri().query() {
         for pair in query.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
-                if k == "token" && v == expected {
+                if k == "token" && constant_time_eq(v, &expected) {
                     return next.run(req).await;
                 }
             }
