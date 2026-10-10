@@ -126,19 +126,10 @@ def _ensure(home):
     all_keys = depotkeys.collect_keys(sp)
     depotkeys.sync_config_vdf(os.path.join(paths.steam_config(home), "config.vdf"), all_keys)
 
-    # Assicura che ogni gioco gestito abbia un appmanifest per comparire in Libreria Steam
+    # Pulisce eventuali appmanifest fantasma (StateFlags 2/18 con size 0) che causano "DOWNLOAD RICHIESTO"
     from core import install
     steamapps_dir = paths.steamapps(home)
-    owner = install.last_owner(os.path.join(paths.steam_config(home), "loginusers.vdf"))
-    for aid in roots:
-        try:
-            cfg = ai.config(aid)
-            name = cfg.get("name") or f"App {aid}"
-            installdir = cfg.get("installdir") or name
-            buildid = ai.public_buildid(aid) or 0
-            install.create_appmanifest(steamapps_dir, aid, name, installdir, buildid, owner)
-        except Exception:
-            pass
+    install.cleanup_broken_appmanifests(steamapps_dir)
 
     return {"apps": sorted(roots), "licensed_apps": sorted(appids), "added": added, "removed": removed,
             "staged": staged, "keys": nkeys}
@@ -184,17 +175,18 @@ def cmd_add(args):
                     with open(os.path.join(args.manifest_dir, fn), "rb") as f:
                         manifests[fn] = f.read()
     else:
-        key = config.get_key(home)
-        if not key:
-            emit(args, {"error": "serve una chiave API (Impostazioni)"})
-            print("serve una chiave API: maclua config set-key",
-                  file=sys.stderr)
-            return 2
+        from core import settings
+        key = config.get_key(home) or settings.get("hubcap_key", "")
+        pref = settings.get("preferred_source", "auto")
+        auto_up = settings.get("auto_update_apps", True)
 
         # Verifica se l'AppID richiesto è un DLC di un gioco base
-        parent_id = ai.parent(args.appid)
-        if parent_id is None:
-            parent_id, _ = catalog.parent_of(args.appid)
+        try:
+            parent_id = ai.parent(args.appid)
+            if parent_id is None:
+                parent_id, _ = catalog.parent_of(args.appid)
+        except Exception:
+            parent_id = None
 
         if parent_id is not None and parent_id != args.appid:
             is_dlc = True
@@ -202,7 +194,7 @@ def cmd_add(args):
             if os.path.exists(parent_lua):
                 # Il gioco base è già gestito: aggiorna il lua dal remote per recuperare manifest/chiavi del DLC
                 try:
-                    f_parent = source.fetch_lua(parent_id, key)
+                    f_parent = source.fetch_from_sources(parent_id, key=key, preferred_source=pref, auto_update=auto_up)
                     install.import_lua(parent_id, f_parent["lua"], f_parent["manifests"], home)
                 except Exception:
                     pass
@@ -224,10 +216,17 @@ def cmd_add(args):
                 print("AppID %d è un DLC di %d: scarico gioco base e relativi DLC..." % (args.appid, target_appid))
             else:
                 print("scarico lua per %d dalla sorgente..." % target_appid)
-        fetched = source.fetch_lua(target_appid, key)
-        lua_text, manifests = fetched["lua"], fetched["manifests"]
+        try:
+            fetched = source.fetch_from_sources(target_appid, key=key, preferred_source=pref, auto_update=auto_up)
+            lua_text, manifests = fetched["lua"], fetched["manifests"]
+        except Exception as e:
+            if not key:
+                emit(args, {"error": "serve una chiave API (Impostazioni)"})
+                print("serve una chiave API: maclua config set-key", file=sys.stderr)
+                return 2
+            raise
         if not quiet:
-            print("lua ok + %d manifest" % len(manifests))
+            print("lua ok + %d manifest (%s)" % (len(manifests), fetched.get("source", "Multi-Source")))
 
     rep = install.import_lua(target_appid, lua_text, manifests, home)
     ens = _ensure(home)

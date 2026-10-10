@@ -34,3 +34,16 @@ def test_last_owner_picks_newest(tmp_path):
 
 def test_last_owner_missing_file(tmp_path):
     assert install.last_owner(str(tmp_path / "nope.vdf")) == "0"
+
+
+def test_cleanup_broken_appmanifests(tmp_path):
+    fake_acf = tmp_path / "appmanifest_1332010.acf"
+    fake_acf.write_text('"AppState"\n{\n\t"appid"\t\t"1332010"\n\t"StateFlags"\t\t"2"\n\t"SizeOnDisk"\t\t"0"\n}\n')
+
+    real_acf = tmp_path / "appmanifest_1671210.acf"
+    real_acf.write_text('"AppState"\n{\n\t"appid"\t\t"1671210"\n\t"StateFlags"\t\t"4"\n\t"SizeOnDisk"\t\t"900000"\n}\n')
+
+    cleaned = install.cleanup_broken_appmanifests(str(tmp_path))
+    assert cleaned == [1332010]
+    assert not fake_acf.exists()
+    assert real_acf.exists()

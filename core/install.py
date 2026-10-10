@@ -175,6 +175,42 @@ def is_game_installed(appid, home=None):
         return False
 
 
+def cleanup_broken_appmanifests(steamapps_dir):
+    """Rimuove gli appmanifest corrotti o finti (StateFlags 2/18 con SizeOnDisk 0 e common vuoto).
+    Questi manifest fittizi fanno comparire 'DOWNLOAD RICHIESTO' invece del pulsante nativo 'INSTALLA'.
+    Ritorna la lista di appid puliti.
+    """
+    cleaned = []
+    if not os.path.isdir(steamapps_dir):
+        return cleaned
+    for fn in os.listdir(steamapps_dir):
+        if not (fn.startswith("appmanifest_") and fn.endswith(".acf")):
+            continue
+        p = os.path.join(steamapps_dir, fn)
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            m_flags = re.search(r'"StateFlags"\s+"(\d+)"', content)
+            m_size = re.search(r'"SizeOnDisk"\s+"(\d+)"', content)
+            flags = int(m_flags.group(1)) if m_flags else 0
+            size = int(m_size.group(1)) if m_size else 0
+            if flags in (2, 18) and size == 0:
+                m_dir = re.search(r'"installdir"\s+"([^"]+)"', content)
+                has_files = False
+                if m_dir:
+                    common_dir = os.path.join(steamapps_dir, "common", m_dir.group(1))
+                    if os.path.isdir(common_dir) and len(os.listdir(common_dir)) > 0:
+                        has_files = True
+                if not has_files:
+                    m_aid = re.search(r'"appid"\s+"(\d+)"', content)
+                    aid = int(m_aid.group(1)) if m_aid else 0
+                    os.remove(p)
+                    cleaned.append(aid)
+        except Exception:
+            pass
+    return cleaned
+
+
 def create_appmanifest(steamapps_dir, appid, name, installdir, buildid, owner):
     """Crea appmanifest minimo (Update Required) se assente. Idempotente:
     se esiste già, lo lascia intatto e ritorna il path."""
