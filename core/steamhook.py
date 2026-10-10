@@ -203,44 +203,116 @@ def handle_rpc_request(path, method="GET", data=None):
         except ValueError:
             return {"ok": False, "error": "AppID non valido"}
 
-        from core import appinfo as ai, catalog, config, source, install, vault, queue
+        from core import appinfo as ai, catalog, config, source, install, vault, settings
         p_id = ai.parent(aid)
         if p_id is None:
             p_id, _ = catalog.parent_of(aid)
         target_id = p_id if p_id else aid
 
-        key = config.get_key(home)
-        if not key:
-            return {"ok": False, "error": "Chiave API mancante nelle impostazioni di MacLua"}
+        key = config.get_key(home) or settings.get("hubcap_key", "")
+        pref = settings.get("preferred_source", "auto")
+        auto_up = settings.get("auto_update_apps", True)
 
         try:
-            fetched = source.fetch_lua(target_id, key)
+            fetched = source.fetch_from_sources(target_id, key=key, preferred_source=pref, auto_update=auto_up)
             install.import_lua(target_id, fetched["lua"], fetched["manifests"], home)
 
-            # Crea appmanifest per rendere visibile il gioco nella Libreria Steam
+            # Pulisce eventuali vecchi appmanifest fantasma (StateFlags 2 con size 0)
             steamapps_dir = paths.steamapps(home)
-            cfg = ai.config(target_id)
-            g_name = cfg.get("name") or catalog.name_of(target_id) or f"App {target_id}"
-            installdir = cfg.get("installdir") or g_name
-            buildid = ai.public_buildid(target_id) or 0
-            owner = install.last_owner(os.path.join(paths.steam_config(home), "loginusers.vdf"))
-            install.create_appmanifest(steamapps_dir, target_id, g_name, installdir, buildid, owner)
+            install.cleanup_broken_appmanifests(steamapps_dir)
 
             from maclua import _ensure
             _ensure(home)
 
             vault.snapshot(target_id, fetched["lua"], note="Aggiunto da Steam")
             game_name = catalog.name_of(target_id) or f"Gioco {target_id}"
-            queue.DownloadQueue.shared().enqueue(target_id, name=game_name)
+
+            try:
+                broadcast_library_refresh(home)
+            except Exception:
+                pass
 
             return {
                 "ok": True,
                 "appid": target_id,
                 "name": game_name,
+                "source": fetched.get("source"),
                 "message": f"Aggiunto {game_name}!"
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    elif path == "/settings":
+        from core import settings
+        if method == "POST":
+            for k, v in data.items():
+                settings.set_val(k, v)
+            return {"ok": True, "settings": settings.get_all()}
+        else:
+            return {"ok": True, "settings": settings.get_all()}
+
+    elif path == "/api-list":
+        return {
+            "ok": True,
+            "sources": [
+                {"id": "auto", "name": "Auto (Sushi -> Ryuu -> Hubcap)", "requires_key": False},
+                {"id": "sushi", "name": "Sushi (GitHub Raw - Gratuito)", "requires_key": False},
+                {"id": "ryuu", "name": "Ryuu (Anonimo - Gratuito)", "requires_key": False},
+                {"id": "hubcap", "name": "Hubcap / Morrenus (Richiede API Key)", "requires_key": True}
+            ]
+        }
+
+    elif path.startswith("/check-sources"):
+        try:
+            aid = int(path.split("/")[-1]) if "/" in path[1:] else int(data.get("appid", 0))
+        except ValueError:
+            return {"ok": False, "error": "AppID non valido"}
+        from core import source
+        ryuu_avail = source.check_ryuu(aid)
+        sushi_avail = False
+        try:
+            source.fetch_from_sushi(aid, timeout=5)
+            sushi_avail = True
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "appid": aid,
+            "sources": {
+                "sushi": sushi_avail,
+                "ryuu": ryuu_avail,
+                "hubcap": True
+            }
+        }
+
+    elif path == "/cleanup-manifests":
+        from core import install
+        cleaned = install.cleanup_broken_appmanifests(paths.steamapps(home))
+        return {"ok": True, "cleaned": cleaned, "count": len(cleaned)}
+
+    elif path == "/library":
+        from core import catalog, install, appinfo as ai
+        stplug = paths.stplug_in(home)
+        games = []
+        if os.path.exists(stplug):
+            for fn in sorted(os.listdir(stplug)):
+                if fn.endswith(".lua"):
+                    try:
+                        aid = int(fn[:-4])
+                        p_id = ai.parent(aid)
+                        if p_id is not None and p_id != aid:
+                            continue
+                        name = catalog.name_of(aid) or f"Gioco {aid}"
+                        installed = install.is_game_installed(aid, home)
+                        games.append({
+                            "appid": aid,
+                            "name": name,
+                            "installed": installed,
+                            "cover": f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{aid}/header.jpg"
+                        })
+                    except Exception:
+                        pass
+        return {"ok": True, "games": games}
 
     elif path == "/remove":
         aid = data.get("appid")
@@ -275,6 +347,11 @@ def handle_rpc_request(path, method="GET", data=None):
         from maclua import _ensure
         _ensure(home)
 
+        try:
+            broadcast_library_refresh(home)
+        except Exception:
+            pass
+
         g_name = catalog.name_of(target_id) or f"App {target_id}"
         return {
             "ok": True,
@@ -290,6 +367,52 @@ def handle_rpc_request(path, method="GET", data=None):
         return restart_steam()
 
     return {"ok": False, "error": f"Endpoint non supportato: {path}"}
+
+
+def broadcast_library_refresh(home=None):
+    """Notifica in tempo reale a SharedJSContext e ai tab della Libreria l'elenco aggiornato dei giochi gestiti."""
+    home = home or os.path.expanduser("~")
+    from core import catalog, install, appinfo as ai
+    stplug = paths.stplug_in(home)
+    games = []
+    if os.path.exists(stplug):
+        for fn in sorted(os.listdir(stplug)):
+            if fn.endswith(".lua"):
+                try:
+                    aid = int(fn[:-4])
+                    p_id = ai.parent(aid)
+                    if p_id is not None and p_id != aid:
+                        continue
+                    name = catalog.name_of(aid) or f"Gioco {aid}"
+                    installed = install.is_game_installed(aid, home)
+                    games.append({
+                        "appid": aid,
+                        "name": name,
+                        "installed": installed,
+                    })
+                except Exception:
+                    pass
+
+    try:
+        req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            tabs = json.loads(resp.read().decode("utf-8"))
+
+        games_json = json.dumps(games)
+        eval_script = f"if (typeof window.__MacLuaSyncLibrary === 'function') {{ window.__MacLuaSyncLibrary({games_json}); }}"
+
+        for t in tabs:
+            url = t.get("url", "")
+            ws = t.get("webSocketDebuggerUrl")
+            if ws and ("steamloopback.host" in url or "SharedJSContext" in t.get("title", "")):
+                client = cdp.CDPClient(ws, timeout=2)
+                try:
+                    client.evaluate(eval_script)
+                finally:
+                    client.close()
+    except Exception:
+        pass
+    return {"ok": True, "count": len(games)}
 
 
 def drain_tab_rpc(client):
@@ -395,7 +518,7 @@ def inject_into_tabs(token=None, js_code=None, css_code=None, force=False):
                 client = cdp.CDPClient(ws, timeout=3)
                 try:
                     has_ver = client.evaluate("String(window.__MacLuaVersion)")
-                    if force or has_ver != "3":
+                    if force or has_ver != "4":
                         client.evaluate(full_script)
                         injected.append({"id": t.get("id"), "url": url, "title": t.get("title")})
                     drain_tab_rpc(client)

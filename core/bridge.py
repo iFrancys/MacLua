@@ -66,6 +66,21 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._send_json(200, {"ok": True, "version": "1.0.0"})
 
+        elif path == "/icon":
+            icon_p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "maclua_icon.png")
+            if os.path.exists(icon_p):
+                with open(icon_p, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self._send_cors()
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(content)
+                return
+            return self._send_json(404, {"error": "Icon not found"})
+
         elif path == "/status":
             home = os.path.expanduser("~")
             import maclua
@@ -107,7 +122,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
         elif path == "/library":
             home = os.path.expanduser("~")
             stplug = paths.stplug_in(home)
-            steamapps = paths.steamapps(home)
             games = []
             if os.path.exists(stplug):
                 for fn in sorted(os.listdir(stplug)):
@@ -119,7 +133,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                             if p_id is not None and p_id != appid:
                                 continue
                             name = catalog.name_of(appid) or f"Gioco {appid}"
-                            installed = os.path.exists(os.path.join(steamapps, f"appmanifest_{appid}.acf"))
+                            installed = install.is_game_installed(appid, home)
                             games.append({
                                 "appid": appid,
                                 "name": name,
@@ -129,6 +143,40 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
             return self._send_json(200, {"games": games})
+
+        elif path == "/api-list":
+            return self._send_json(200, {
+                "ok": True,
+                "sources": [
+                    {"id": "auto", "name": "Auto (Sushi -> Ryuu -> Hubcap)", "requires_key": False},
+                    {"id": "sushi", "name": "Sushi (GitHub Raw - Gratuito)", "requires_key": False},
+                    {"id": "ryuu", "name": "Ryuu (Anonimo - Gratuito)", "requires_key": False},
+                    {"id": "hubcap", "name": "Hubcap / Morrenus (Richiede API Key)", "requires_key": True}
+                ]
+            })
+
+        elif path.startswith("/check-sources"):
+            try:
+                aid = int(path.split("/")[-1])
+            except ValueError:
+                return self._send_json(400, {"error": "AppID non valido"})
+            from core import source
+            ryuu_avail = source.check_ryuu(aid)
+            sushi_avail = False
+            try:
+                source.fetch_from_sushi(aid, timeout=5)
+                sushi_avail = True
+            except Exception:
+                pass
+            return self._send_json(200, {
+                "ok": True,
+                "appid": aid,
+                "sources": {
+                    "sushi": sushi_avail,
+                    "ryuu": ryuu_avail,
+                    "hubcap": True
+                }
+            })
 
         elif path.startswith("/game/"):
             try:
@@ -239,42 +287,46 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 p_id, _ = catalog.parent_of(appid)
             target_id = p_id if p_id else appid
 
-            # Importa lua
             home = os.path.expanduser("~")
-            key = config.get_key(home)
-            if not key:
-                return self._send_json(400, {"error": "Chiave API mancante nelle impostazioni"})
+            key = config.get_key(home) or settings.get("hubcap_key", "")
+            pref = settings.get("preferred_source", "auto")
+            auto_up = settings.get("auto_update_apps", True)
 
             from core import source
             try:
-                fetched = source.fetch_lua(target_id, key)
+                fetched = source.fetch_from_sources(target_id, key=key, preferred_source=pref, auto_update=auto_up)
                 install.import_lua(target_id, fetched["lua"], fetched["manifests"], home)
 
-                # Crea appmanifest se assente per visualizzare il gioco in Libreria Steam
+                # Pulisce eventuali vecchi appmanifest fantasma (StateFlags 2 con size 0)
                 steamapps_dir = paths.steamapps(home)
-                cfg = ai.config(target_id)
-                g_name = cfg.get("name") or catalog.name_of(target_id) or f"App {target_id}"
-                installdir = cfg.get("installdir") or g_name
-                buildid = ai.public_buildid(target_id) or 0
-                owner = install.last_owner(os.path.join(paths.steam_config(home), "loginusers.vdf"))
-                install.create_appmanifest(steamapps_dir, target_id, g_name, installdir, buildid, owner)
+                install.cleanup_broken_appmanifests(steamapps_dir)
 
                 # Sincronizza licenze, chiavi e manifest per Steam
                 from maclua import _ensure
                 _ensure(home)
                 # Salva snapshot nel vault
                 vault.snapshot(target_id, fetched["lua"], note="Importazione automatica in-Steam")
-                # Accoda il download
-                queue.DownloadQueue.shared().enqueue(target_id, name=catalog.name_of(target_id))
+
+                from core import steamhook
+                try:
+                    steamhook.broadcast_library_refresh(home)
+                except Exception:
+                    pass
             except Exception as e:
                 return self._send_json(500, {"error": f"Errore durante l'aggiunta: {str(e)}"})
 
             return self._send_json(200, {
                 "ok": True,
                 "appid": target_id,
+                "source": fetched.get("source"),
                 "dlc_resolved": bool(p_id and p_id != appid),
-                "message": f"Aggiunto {target_id} con tutti i DLC inclusi e download accodato."
+                "message": f"Aggiunto {target_id} ({fetched.get('source', 'Multi-Source')}) con tutti i DLC inclusi."
             })
+
+        elif path == "/cleanup-manifests":
+            home = os.path.expanduser("~")
+            cleaned = install.cleanup_broken_appmanifests(paths.steamapps(home))
+            return self._send_json(200, {"ok": True, "cleaned": cleaned, "count": len(cleaned)})
 
         elif path == "/remove":
             appid = data.get("appid")
@@ -303,6 +355,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
             from maclua import _ensure
             _ensure(home)
+
+            from core import steamhook
+            try:
+                steamhook.broadcast_library_refresh(home)
+            except Exception:
+                pass
 
             g_name = catalog.name_of(target_id) or f"App {target_id}"
             return self._send_json(200, {"ok": True, "appid": target_id, "message": f"{g_name} rimosso da MacLua"})
@@ -423,12 +481,32 @@ def get_game_depots(appid, home=None):
 def start_continuous_injector_daemon():
     """Avvia il thread demone per monitorare e gestire Steam continuamente (RPC rapido a 200ms e iniezione a 1s)."""
     def _loop():
+        home = os.path.expanduser("~")
+        try:
+            import maclua
+            maclua._ensure(home)
+        except Exception:
+            pass
+
         tick = 0
         while True:
             try:
                 steamhook.drain_all_tabs_rpc()
                 if tick % 5 == 0:
                     steamhook.inject_into_tabs()
+                # Verifica salute packageinfo.vdf ogni ~10s (50 tick)
+                if tick % 50 == 0:
+                    try:
+                        import maclua
+                        from core import license
+                        pkginfo = os.path.join(paths.appcache(home), "packageinfo.vdf")
+                        if os.path.exists(pkginfo):
+                            appids, depots = maclua._managed_sets(home)
+                            m_app, m_dep = license.check(pkginfo, appids, depots)
+                            if m_app or m_dep:
+                                maclua._ensure(home)
+                    except Exception:
+                        pass
             except Exception:
                 pass
             tick += 1
