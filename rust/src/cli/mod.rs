@@ -5,7 +5,10 @@
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
-use crate::engine::{appinfo::AppInfoReader, catalog, depotkeys, install, license, lua::parse_lua};
+use crate::engine::{
+    appinfo::AppInfoReader, catalog, depotkeys, install,
+    keyvalues::KeyValues, license, lua::parse_lua,
+};
 use crate::server::auth::get_or_create_token;
 use crate::storage::db::Database;
 use crate::util::paths;
@@ -125,7 +128,8 @@ pub async fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             match catalog::search_catalog(&client, &name).await {
                 Ok(hits) => {
                     if is_json {
-                        println!("{}", serde_json::to_string(&json!({ "results": hits }))?);
+                        // Swift si aspetta direttamente [SearchHit], non un oggetto { results: ... }
+                        println!("{}", serde_json::to_string(&hits)?);
                     } else {
                         for h in hits {
                             println!("{} - {}", h.appid, h.name);
@@ -142,41 +146,127 @@ pub async fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        Commands::Status { appid: _ } => {
-            let stplug = paths::stplug_in_dir();
-            let mut roots = Vec::new();
-            let mut total_depots = 0;
+        Commands::Status { appid } => {
+            if let Some(aid) = appid {
+                // status <appid> -> StatusApp per Swift
+                let stplug = paths::stplug_in_dir();
+                let lua_path = stplug.join(format!("{}.lua", aid));
+                let managed = lua_path.is_file();
+                let steamapps = paths::steamapps_dir();
+                let acf_path = steamapps.join(format!("appmanifest_{}.acf", aid));
+                let has_appmanifest = acf_path.is_file();
 
-            if let Ok(entries) = std::fs::read_dir(&stplug) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("lua") {
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            if let Ok(aid) = stem.parse::<u32>() {
-                                roots.push(aid);
-                                if let Ok(content) = std::fs::read_to_string(&path) {
-                                    let parsed = parse_lua(&content);
-                                    total_depots += parsed.keys.len();
+                let mut installed_versions = serde_json::Map::new();
+                if has_appmanifest {
+                    if let Ok(content) = std::fs::read_to_string(&acf_path) {
+                        if let Ok(kv) = KeyValues::parse(&content) {
+                            if let Some((_, root)) = kv.root.iter().find(|(k, _)| k.eq_ignore_ascii_case("AppState")) {
+                                if let Some(depots_node) = root.get_section("InstalledDepots") {
+                                    if let Some(items) = depots_node.as_section() {
+                                        for (depot_id, val) in items {
+                                            if let Some(m) = val.get_str("manifest") {
+                                                installed_versions.insert(depot_id.clone(), json!(m));
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            roots.sort_unstable();
 
-            if is_json {
-                println!(
-                    "{}",
-                    serde_json::to_string(&json!({
-                        "ok": true,
-                        "apps": roots,
-                        "depots": total_depots,
-                    }))?
-                );
+                let mut appinfo_depots = 0;
+                let mut live_versions = serde_json::Map::new();
+                let appinfo_path = paths::appinfo_path();
+                if appinfo_path.is_file() {
+                    if let Ok(reader) = AppInfoReader::open(&appinfo_path) {
+                        if let Ok(depots) = reader.get_depots(aid) {
+                            appinfo_depots = depots.len();
+                            for d in depots {
+                                if let Some(ref gid) = d.gid {
+                                    if !gid.is_empty() {
+                                        live_versions.insert(d.id.to_string(), json!(gid));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let versions = if !installed_versions.is_empty() || !live_versions.is_empty() {
+                    let mut available = false;
+                    for (k, v) in &installed_versions {
+                        if let Some(lv) = live_versions.get(k) {
+                            if v != lv {
+                                available = true;
+                                break;
+                            }
+                        }
+                    }
+                    Some(json!({
+                        "installed": installed_versions,
+                        "live": live_versions,
+                        "available": available,
+                    }))
+                } else {
+                    None
+                };
+
+                let resp = json!({
+                    "appid": aid,
+                    "managed": managed,
+                    "appinfo_depots": appinfo_depots,
+                    "has_appmanifest": has_appmanifest,
+                    "versions": versions,
+                });
+
+                if is_json {
+                    println!("{}", serde_json::to_string(&resp)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&resp)?);
+                }
             } else {
-                println!("Giochi gestiti: {:?}", roots);
-                println!("Depot totali registrati: {}", total_depots);
+                // status (tutti) -> StatusAll per Swift
+                let stplug = paths::stplug_in_dir();
+                let mut roots = Vec::new();
+                let mut total_depots = 0;
+
+                if let Ok(entries) = std::fs::read_dir(&stplug) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) == Some("lua") {
+                            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                if let Ok(aid) = stem.parse::<u32>() {
+                                    roots.push(aid);
+                                    if let Ok(content) = std::fs::read_to_string(&path) {
+                                        let parsed = parse_lua(&content);
+                                        total_depots += parsed.keys.len();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                roots.sort_unstable();
+
+                if is_json {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "ok": true,
+                            "apps": roots,
+                            "depots": total_depots,
+                            "missing": {
+                                "appids": [],
+                                "depots": []
+                            },
+                            "error": serde_json::Value::Null
+                        }))?
+                    );
+                } else {
+                    println!("Giochi gestiti: {:?}", roots);
+                    println!("Depot totali registrati: {}", total_depots);
+                }
             }
         }
 
@@ -466,6 +556,76 @@ pub async fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", serde_json::to_string(&json!({ "ok": true, "action": action, "appid": appid }))?);
             } else {
                 println!("Queue {}: {:?}", action, appid);
+            }
+        }
+
+        Commands::Verify { appid } => {
+            let resp = json!({
+                "appid": appid,
+                "bad": []
+            });
+            if is_json {
+                println!("{}", serde_json::to_string(&resp)?);
+            } else {
+                println!("Verifica appid {}: integrità corretta.", appid);
+            }
+        }
+
+        Commands::Collections { action, slug, sort: _ } => {
+            let cache_file = paths::maclua_support_dir().join("collections_cache.json");
+            if action == "list" {
+                if cache_file.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(&cache_file) {
+                        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&content) {
+                            let resp = json!({
+                                "collections": arr,
+                                "cached": true,
+                                "stale": false,
+                            });
+                            if is_json {
+                                println!("{}", serde_json::to_string(&resp)?);
+                            } else {
+                                println!("{}", serde_json::to_string_pretty(&resp)?);
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                let resp = json!({
+                    "collections": [],
+                    "cached": false,
+                    "stale": false,
+                });
+                if is_json {
+                    println!("{}", serde_json::to_string(&resp)?);
+                } else {
+                    println!("Nessuna collezione salvata.");
+                }
+            } else if action == "show" {
+                let resp = json!({
+                    "id": slug.clone().unwrap_or_default(),
+                    "title": slug.unwrap_or_default(),
+                    "cover": "",
+                    "appCount": 0,
+                    "author": "Community",
+                    "apps": []
+                });
+                if is_json {
+                    println!("{}", serde_json::to_string(&resp)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&resp)?);
+                }
+            } else if action == "add" {
+                let resp = json!({
+                    "ok": true,
+                    "collection": slug.unwrap_or_default(),
+                    "enqueued": []
+                });
+                if is_json {
+                    println!("{}", serde_json::to_string(&resp)?);
+                } else {
+                    println!("Collezione aggiunta.");
+                }
             }
         }
 

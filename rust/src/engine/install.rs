@@ -128,6 +128,14 @@ pub fn fix_executables<P: AsRef<Path>>(root: P) -> usize {
                                         let _ = std::fs::set_permissions(&real_path, rp);
                                     }
                                     *fixed += 1;
+
+                                    // Firma ad-hoc il bundle .app per evitare SIGKILL da parte di taskgated su Apple Silicon
+                                    #[cfg(target_os = "macos")]
+                                    if let Some(app_bundle) = dir.parent().and_then(|p| p.parent()) {
+                                        let _ = std::process::Command::new("codesign")
+                                            .args(["--force", "--deep", "--sign", "-", app_bundle.to_str().unwrap_or("")])
+                                            .status();
+                                    }
                                 } else {
                                     // Ripristino atomico in caso di errore di scrittura
                                     let _ = std::fs::rename(&real_path, &path);
