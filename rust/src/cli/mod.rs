@@ -257,6 +257,77 @@ pub async fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        Commands::Config { action, value } => {
+            let config_path = paths::config_json_path();
+            if action == "show" {
+                let env_key = std::env::var("MACLUA_HUBCAP_KEY").ok().filter(|s| !s.trim().is_empty());
+                let (has_key, source) = if env_key.is_some() {
+                    (true, Some("env"))
+                } else if config_path.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(&config_path) {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if v.get("hubcap_key").and_then(|k| k.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false) {
+                                (true, Some("file"))
+                            } else {
+                                (false, None)
+                            }
+                        } else {
+                            (false, None)
+                        }
+                    } else {
+                        (false, None)
+                    }
+                } else {
+                    (false, None)
+                };
+
+                if is_json {
+                    println!("{}", serde_json::to_string(&json!({ "has_key": has_key, "source": source }))?);
+                } else {
+                    println!("has_key: {}, source: {:?}", has_key, source);
+                }
+            } else if action == "set-key" {
+                let key_str = if let Some(v) = value {
+                    if v == "-" {
+                        use std::io::Read;
+                        let mut buf = String::new();
+                        std::io::stdin().read_to_string(&mut buf).unwrap_or_default();
+                        buf.trim().to_string()
+                    } else {
+                        v
+                    }
+                } else {
+                    String::new()
+                };
+
+                if !key_str.is_empty() {
+                    let _ = std::fs::create_dir_all(paths::maclua_support_dir());
+                    let payload = json!({ "hubcap_key": key_str });
+                    let _ = std::fs::write(&config_path, payload.to_string());
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600));
+                    }
+                }
+
+                if is_json {
+                    println!("{}", serde_json::to_string(&json!({ "has_key": true, "source": "file" }))?);
+                } else {
+                    println!("Chiave API impostata.");
+                }
+            } else if action == "clear-key" {
+                if config_path.exists() {
+                    let _ = std::fs::remove_file(&config_path);
+                }
+                if is_json {
+                    println!("{}", serde_json::to_string(&json!({ "has_key": false, "source": serde_json::Value::Null }))?);
+                } else {
+                    println!("Chiave API rimossa.");
+                }
+            }
+        }
+
         Commands::Fixes { action: _, appid } => {
             let db = Database::open_default()?;
             let fixes = db.get_fixes(appid)?;

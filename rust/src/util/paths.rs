@@ -41,17 +41,26 @@ pub fn depotcache_dir() -> PathBuf {
 }
 
 pub fn stplug_in_dir() -> PathBuf {
-    // Primary path: steamapps/common/stplug-in
+    // 1. Primary path on macOS: Steam/config/stplug-in
+    let config_dir = steam_root().join("config/stplug-in");
+    if config_dir.exists() {
+        return config_dir;
+    }
+    // 2. Fallback: steamapps/common/stplug-in
     let primary = steamapps_dir().join("common/stplug-in");
     if primary.exists() {
         return primary;
     }
-    // Fallback: steam_root/stplug-in
+    // 3. Fallback: steam_root/stplug-in
     let fallback = steam_root().join("stplug-in");
     if fallback.exists() {
         return fallback;
     }
-    primary
+    config_dir
+}
+
+pub fn config_json_path() -> PathBuf {
+    maclua_support_dir().join("config.json")
 }
 
 pub fn config_vdf_path() -> PathBuf {
