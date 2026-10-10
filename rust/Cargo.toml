@@ -1,0 +1,45 @@
+[package]
+name = "maclua"
+version = "0.2.0"
+edition = "2021"
+description = "High-performance native Steam manager for macOS (CLI & Bridge Daemon)"
+authors = ["MacLua Contributors"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.38", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors"] }
+tokio-tungstenite = { version = "0.23", features = ["connect"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+aes = "0.8"
+cbc = "0.1"
+cipher = { version = "0.4", features = ["block-padding"] }
+sha1 = "0.10"
+sha2 = "0.10"
+zstd = "0.13"
+lzma-rs = "0.3"
+zip = { version = "2.1", default-features = false, features = ["deflate"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crc32fast = "1.4"
+byteorder = "1.5"
+futures-util = "0.3"
+regex = "1.10"
+hex = "0.4"
+base64 = "0.22"
+thiserror = "1.0"
+urlencoding = "2.1"
+getrandom = "0.2"
+tokio-stream = { version = "0.1", features = ["time"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

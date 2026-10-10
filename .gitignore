@@ -5,6 +5,8 @@
 # Build and compilation outputs
 .build/
 target/
+rust/target/
+**/target/
 *.tmp
 *.tmp.*
 

@@ -130,9 +130,38 @@ struct GameDepotsResponse: Codable, Sendable, Identifiable, Equatable {
     }
 }
 
-// MARK: - Risoluzione Script Python
+// MARK: - Risoluzione Eseguibile Nativo / Script
 
 enum Locator {
+    static func nativeBinaryURL() -> URL? {
+        if let root = ProcessInfo.processInfo.environment["MACLUA_ROOT"] {
+            let candidate = URL(fileURLWithPath: root).appending(path: "maclua")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
+        }
+        if let bin = Bundle.main.url(forAuxiliaryExecutable: "maclua") {
+            return bin
+        }
+        let helper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/maclua")
+        if FileManager.default.isExecutableFile(atPath: helper.path) {
+            return helper
+        }
+        if let exec = Bundle.main.executableURL?.deletingLastPathComponent().appending(path: "maclua"),
+           FileManager.default.isExecutableFile(atPath: exec.path) {
+            return exec
+        }
+        var dir = Bundle.main.bundleURL
+        for _ in 0..<5 {
+            dir = dir.deletingLastPathComponent()
+            let candidate = dir.appending(path: "rust/target/release/maclua")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
+            let direct = dir.appending(path: "maclua")
+            if FileManager.default.isExecutableFile(atPath: direct.path) { return direct }
+        }
+        let devPath = URL(fileURLWithPath: "/Users/ciccioomazz/Desktop/MacLua/rust/target/release/maclua")
+        if FileManager.default.isExecutableFile(atPath: devPath.path) { return devPath }
+        return nil
+    }
+
     static func scriptURL() -> URL {
         var candidates: [URL] = []
         if let root = ProcessInfo.processInfo.environment["MACLUA_ROOT"] {
@@ -156,11 +185,12 @@ enum Locator {
     }
 }
 
-// MARK: - Bridge Nativo verso maclua.py
+// MARK: - Bridge Nativo verso maclua
 
 struct MacLuaBridge: Sendable {
     let pythonURL: URL
     let scriptURL: URL
+    let nativeBinaryURL: URL?
     var timeout: TimeInterval = 180
 
     static let live: MacLuaBridge = {
@@ -168,14 +198,30 @@ struct MacLuaBridge: Sendable {
             .map { URL(fileURLWithPath: $0) }
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
             ?? URL(fileURLWithPath: "/usr/bin/python3")
-        return MacLuaBridge(pythonURL: python, scriptURL: Locator.scriptURL())
+        return MacLuaBridge(
+            pythonURL: python,
+            scriptURL: Locator.scriptURL(),
+            nativeBinaryURL: Locator.nativeBinaryURL()
+        )
     }()
+
+    init(pythonURL: URL, scriptURL: URL, nativeBinaryURL: URL? = nil, timeout: TimeInterval = 180) {
+        self.pythonURL = pythonURL
+        self.scriptURL = scriptURL
+        self.nativeBinaryURL = nativeBinaryURL
+        self.timeout = timeout
+    }
 
     @discardableResult
     func run(_ args: [String], stdinInput: String? = nil) throws -> Data {
         let proc = Process()
-        proc.executableURL = pythonURL
-        proc.arguments = [scriptURL.path, "--json"] + args
+        if let native = nativeBinaryURL {
+            proc.executableURL = native
+            proc.arguments = ["--json"] + args
+        } else {
+            proc.executableURL = pythonURL
+            proc.arguments = [scriptURL.path, "--json"] + args
+        }
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -376,8 +422,13 @@ struct MacLuaBridge: Sendable {
                 return
             }
             let proc = Process()
-            proc.executableURL = self.pythonURL
-            proc.arguments = [self.scriptURL.path, "bridge", "serve"]
+            if let native = self.nativeBinaryURL {
+                proc.executableURL = native
+                proc.arguments = ["bridge", "serve"]
+            } else {
+                proc.executableURL = self.pythonURL
+                proc.arguments = [self.scriptURL.path, "bridge", "serve"]
+            }
             try? proc.run()
         }
     }

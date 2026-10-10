@@ -180,140 +180,196 @@ enum AccentPreset: String, CaseIterable, Identifiable {
     }
 }
 
+struct AppearanceConfig: Codable, Equatable {
+    var theme: AppThemePreset = .night
+    var bgStyle: BackgroundStyle = .gradient
+    var density: DensityLevel = .comfortable
+    var textScale: TextScale = .medium
+    var accentHex: String = "#38B6FF"
+    var isSidebarExpanded: Bool = true
+    var showLargeHero: Bool = true
+    var gridCardWidth: Double = 180.0
+    var cornerRadius: Double = 12.0
+    var reduceMotion: Bool = false
+    var restartSteamOnAdd: Bool = true
+    var customBgType: CustomBackgroundType = .none
+    var customBgPath: String? = nil
+    var customBgColorHex: String = "#0d141e"
+    var bgBlurRadius: Double = 15.0
+    var bgDimming: Double = 0.35
+    var bgFitMode: BackgroundFitMode = .fill
+    var pauseGifOnInactive: Bool = true
+}
+
 @Observable @MainActor
 final class AppearanceSettings {
     static let shared = AppearanceSettings()
 
-    // MARK: - Proprietà con persistenza UserDefaults
+    var config: AppearanceConfig {
+        didSet {
+            saveConfig()
+        }
+    }
+
+    private func saveConfig() {
+        if let data = try? JSONEncoder().encode(config) {
+            UserDefaults.standard.set(data, forKey: "maclua_appearance_config")
+        }
+        syncToSettingsFile()
+    }
 
     var theme: AppThemePreset {
-        didSet { UserDefaults.standard.set(theme.rawValue, forKey: "app_theme") }
+        get { config.theme }
+        set { config.theme = newValue }
     }
 
     var bgStyle: BackgroundStyle {
-        didSet { UserDefaults.standard.set(bgStyle.rawValue, forKey: "app_bg_style") }
+        get { config.bgStyle }
+        set { config.bgStyle = newValue }
     }
 
     var density: DensityLevel {
-        didSet { UserDefaults.standard.set(density.rawValue, forKey: "app_density") }
+        get { config.density }
+        set { config.density = newValue }
     }
 
     var textScale: TextScale {
-        didSet { UserDefaults.standard.set(textScale.rawValue, forKey: "app_text_scale") }
+        get { config.textScale }
+        set { config.textScale = newValue }
     }
 
     var accentHex: String {
-        didSet { UserDefaults.standard.set(accentHex, forKey: "app_accent_hex") }
+        get { config.accentHex }
+        set { config.accentHex = newValue }
     }
 
     var isSidebarExpanded: Bool {
-        didSet { UserDefaults.standard.set(isSidebarExpanded, forKey: "app_sidebar_expanded") }
+        get { config.isSidebarExpanded }
+        set { config.isSidebarExpanded = newValue }
     }
 
     var showLargeHero: Bool {
-        didSet { UserDefaults.standard.set(showLargeHero, forKey: "app_show_hero") }
+        get { config.showLargeHero }
+        set { config.showLargeHero = newValue }
     }
 
     var gridCardWidth: Double {
-        didSet { UserDefaults.standard.set(gridCardWidth, forKey: "app_grid_width") }
+        get { config.gridCardWidth }
+        set { config.gridCardWidth = newValue }
     }
 
     var cornerRadius: Double {
-        didSet { UserDefaults.standard.set(cornerRadius, forKey: "app_corner_radius") }
+        get { config.cornerRadius }
+        set { config.cornerRadius = newValue }
     }
 
     var reduceMotion: Bool {
-        didSet { UserDefaults.standard.set(reduceMotion, forKey: "app_reduce_motion") }
+        get { config.reduceMotion }
+        set { config.reduceMotion = newValue }
     }
 
     var restartSteamOnAdd: Bool {
-        didSet { UserDefaults.standard.set(restartSteamOnAdd, forKey: "app_restart_steam_on_add") }
+        get { config.restartSteamOnAdd }
+        set { config.restartSteamOnAdd = newValue }
     }
 
-    // MARK: - Sfondo Personalizzato (Immagini e GIF Animate)
-
     var customBgType: CustomBackgroundType {
-        didSet {
-            UserDefaults.standard.set(customBgType.rawValue, forKey: "app_custom_bg_type")
-            syncToSettingsFile()
-        }
+        get { config.customBgType }
+        set { config.customBgType = newValue }
     }
 
     var customBgPath: String? {
-        didSet {
-            UserDefaults.standard.set(customBgPath, forKey: "app_custom_bg_path")
-            syncToSettingsFile()
-        }
+        get { config.customBgPath }
+        set { config.customBgPath = newValue }
     }
 
     var customBgColorHex: String {
-        didSet {
-            UserDefaults.standard.set(customBgColorHex, forKey: "app_custom_bg_color")
-            syncToSettingsFile()
-        }
+        get { config.customBgColorHex }
+        set { config.customBgColorHex = newValue }
     }
 
     var bgBlurRadius: Double {
-        didSet {
-            UserDefaults.standard.set(bgBlurRadius, forKey: "app_bg_blur")
-            syncToSettingsFile()
-        }
+        get { config.bgBlurRadius }
+        set { config.bgBlurRadius = newValue }
     }
 
     var bgDimming: Double {
-        didSet {
-            UserDefaults.standard.set(bgDimming, forKey: "app_bg_dim")
-            syncToSettingsFile()
-        }
+        get { config.bgDimming }
+        set { config.bgDimming = newValue }
     }
 
     var bgFitMode: BackgroundFitMode {
-        didSet {
-            UserDefaults.standard.set(bgFitMode.rawValue, forKey: "app_bg_fit")
-            syncToSettingsFile()
-        }
+        get { config.bgFitMode }
+        set { config.bgFitMode = newValue }
     }
 
     var pauseGifOnInactive: Bool {
-        didSet {
-            UserDefaults.standard.set(pauseGifOnInactive, forKey: "app_pause_gif_inactive")
-            syncToSettingsFile()
-        }
+        get { config.pauseGifOnInactive }
+        set { config.pauseGifOnInactive = newValue }
     }
 
     init() {
         let def = UserDefaults.standard
-
-        let themeStr = def.string(forKey: "app_theme") ?? AppThemePreset.night.rawValue
-        self.theme = AppThemePreset(rawValue: themeStr) ?? .night
-
-        let bgStr = def.string(forKey: "app_bg_style") ?? BackgroundStyle.gradient.rawValue
-        self.bgStyle = BackgroundStyle(rawValue: bgStr) ?? .gradient
-
-        let denStr = def.string(forKey: "app_density") ?? DensityLevel.comfortable.rawValue
-        self.density = DensityLevel(rawValue: denStr) ?? .comfortable
-
-        let tsStr = def.string(forKey: "app_text_scale") ?? TextScale.medium.rawValue
-        self.textScale = TextScale(rawValue: tsStr) ?? .medium
-
-        self.accentHex = def.string(forKey: "app_accent_hex") ?? "#38B6FF"
-        self.isSidebarExpanded = def.object(forKey: "app_sidebar_expanded") == nil ? true : def.bool(forKey: "app_sidebar_expanded")
-        self.showLargeHero = def.object(forKey: "app_show_hero") == nil ? true : def.bool(forKey: "app_show_hero")
-        self.gridCardWidth = def.object(forKey: "app_grid_width") == nil ? 180.0 : def.double(forKey: "app_grid_width")
-        self.cornerRadius = def.object(forKey: "app_corner_radius") == nil ? 12.0 : def.double(forKey: "app_corner_radius")
-        self.reduceMotion = def.bool(forKey: "app_reduce_motion")
-        // Default on per richiesta utente
-        self.restartSteamOnAdd = def.object(forKey: "app_restart_steam_on_add") == nil ? true : def.bool(forKey: "app_restart_steam_on_add")
-
-        let bgTypeStr = def.string(forKey: "app_custom_bg_type") ?? CustomBackgroundType.none.rawValue
-        self.customBgType = CustomBackgroundType(rawValue: bgTypeStr) ?? .none
-        self.customBgPath = def.string(forKey: "app_custom_bg_path")
-        self.customBgColorHex = def.string(forKey: "app_custom_bg_color") ?? "#0d141e"
-        self.bgBlurRadius = def.object(forKey: "app_bg_blur") == nil ? 15.0 : def.double(forKey: "app_bg_blur")
-        self.bgDimming = def.object(forKey: "app_bg_dim") == nil ? 0.35 : def.double(forKey: "app_bg_dim")
-        let fitStr = def.string(forKey: "app_bg_fit") ?? BackgroundFitMode.fill.rawValue
-        self.bgFitMode = BackgroundFitMode(rawValue: fitStr) ?? .fill
-        self.pauseGifOnInactive = def.object(forKey: "app_pause_gif_inactive") == nil ? true : def.bool(forKey: "app_pause_gif_inactive")
+        if let data = def.data(forKey: "maclua_appearance_config"),
+           let saved = try? JSONDecoder().decode(AppearanceConfig.self, from: data) {
+            self.config = saved
+        } else {
+            var c = AppearanceConfig()
+            if let themeStr = def.string(forKey: "app_theme"), let t = AppThemePreset(rawValue: themeStr) {
+                c.theme = t
+            }
+            if let bgStr = def.string(forKey: "app_bg_style"), let b = BackgroundStyle(rawValue: bgStr) {
+                c.bgStyle = b
+            }
+            if let denStr = def.string(forKey: "app_density"), let d = DensityLevel(rawValue: denStr) {
+                c.density = d
+            }
+            if let tsStr = def.string(forKey: "app_text_scale"), let ts = TextScale(rawValue: tsStr) {
+                c.textScale = ts
+            }
+            if let acc = def.string(forKey: "app_accent_hex") {
+                c.accentHex = acc
+            }
+            if def.object(forKey: "app_sidebar_expanded") != nil {
+                c.isSidebarExpanded = def.bool(forKey: "app_sidebar_expanded")
+            }
+            if def.object(forKey: "app_show_hero") != nil {
+                c.showLargeHero = def.bool(forKey: "app_show_hero")
+            }
+            if def.object(forKey: "app_grid_width") != nil {
+                c.gridCardWidth = def.double(forKey: "app_grid_width")
+            }
+            if def.object(forKey: "app_corner_radius") != nil {
+                c.cornerRadius = def.double(forKey: "app_corner_radius")
+            }
+            c.reduceMotion = def.bool(forKey: "app_reduce_motion")
+            if def.object(forKey: "app_restart_steam_on_add") != nil {
+                c.restartSteamOnAdd = def.bool(forKey: "app_restart_steam_on_add")
+            }
+            if let bgTypeStr = def.string(forKey: "app_custom_bg_type"), let bt = CustomBackgroundType(rawValue: bgTypeStr) {
+                c.customBgType = bt
+            }
+            c.customBgPath = def.string(forKey: "app_custom_bg_path")
+            if let col = def.string(forKey: "app_custom_bg_color") {
+                c.customBgColorHex = col
+            }
+            if def.object(forKey: "app_bg_blur") != nil {
+                c.bgBlurRadius = def.double(forKey: "app_bg_blur")
+            }
+            if def.object(forKey: "app_bg_dim") != nil {
+                c.bgDimming = def.double(forKey: "app_bg_dim")
+            }
+            if let fitStr = def.string(forKey: "app_bg_fit"), let f = BackgroundFitMode(rawValue: fitStr) {
+                c.bgFitMode = f
+            }
+            if def.object(forKey: "app_pause_gif_inactive") != nil {
+                c.pauseGifOnInactive = def.bool(forKey: "app_pause_gif_inactive")
+            }
+            self.config = c
+            if let data = try? JSONEncoder().encode(c) {
+                def.set(data, forKey: "maclua_appearance_config")
+            }
+        }
     }
 
     var accentColor: Color {

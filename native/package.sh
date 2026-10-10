@@ -1,35 +1,49 @@
 #!/bin/zsh
 # Impacchetta MacLua.app universale (Apple Silicon arm64 + Intel x86_64).
-# Esegue verifiche, build release universale, firma e installazione pulita.
+# Backend nativo in Rust + Frontend nativo in Swift/SwiftUI. Zero dipendenze runtime Python.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "== verifiche interne =="
+export PATH="$HOME/.cargo/bin:$PATH"
+
+echo "== verifiche interne Rust =="
+cargo test --manifest-path ../rust/Cargo.toml
+
+echo "== verifiche interne Swift =="
 MACLUA_CHECK=1 swift run -c release MacApp | tail -n 3
 
-echo "== build release universale (arm64 + x86_64) =="
-echo "-> Compilazione per Apple Silicon (arm64)..."
+echo "== build release backend Rust universale (arm64 + x86_64) =="
+echo "-> Compilazione Rust per Apple Silicon (arm64)..."
+cargo build --manifest-path ../rust/Cargo.toml --release --target aarch64-apple-darwin
+
+echo "-> Compilazione Rust per chip Intel (x86_64)..."
+cargo build --manifest-path ../rust/Cargo.toml --release --target x86_64-apple-darwin
+
+echo "== build release frontend Swift universale (arm64 + x86_64) =="
+echo "-> Compilazione Swift per Apple Silicon (arm64)..."
 swift build -c release --triple arm64-apple-macosx14.0
 cp .build/release/MacApp /tmp/MacApp_arm64
 
-echo "-> Compilazione per chip Intel (x86_64)..."
+echo "-> Compilazione Swift per chip Intel (x86_64)..."
 swift build -c release --triple x86_64-apple-macosx14.0
 cp .build/release/MacApp /tmp/MacApp_x86_64
 
 APP="$PWD/MacLua.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Resources/backend"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
 
-echo "-> Unione in binario Mach-O universale con lipo..."
+echo "-> Unione frontend Mach-O universale con lipo..."
 lipo -create /tmp/MacApp_arm64 /tmp/MacApp_x86_64 -output "$APP/Contents/MacOS/MacLua"
 rm -f /tmp/MacApp_arm64 /tmp/MacApp_x86_64
 
-cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+echo "-> Unione backend Mach-O universale con lipo..."
+lipo -create \
+    ../rust/target/aarch64-apple-darwin/release/maclua \
+    ../rust/target/x86_64-apple-darwin/release/maclua \
+    -output "$APP/Contents/Helpers/maclua"
+chmod 755 "$APP/Contents/Helpers/maclua"
 
-# Backend Python: unica fonte di verità, impacchettato insieme all'app.
-cp ../maclua.py "$APP/Contents/Resources/backend/maclua.py"
-cp -R ../core "$APP/Contents/Resources/backend/core"
-find "$APP/Contents/Resources/backend" -name '__pycache__' -type d -prune -exec rm -rf {} +
+cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -39,8 +53,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>MacLua</string>
   <key>CFBundleDisplayName</key><string>MacLua</string>
   <key>CFBundleIdentifier</key><string>dev.maclua.app</string>
-  <key>CFBundleVersion</key><string>0.1.0</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>0.2.0</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>MacLua</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -51,6 +65,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+codesign --force --sign - "$APP/Contents/Helpers/maclua" >/dev/null
 codesign --force --deep --sign - "$APP" >/dev/null
 
 echo "== installazione pulita =="
@@ -66,4 +81,4 @@ fi
 # Rimuovi il bundle duplicato in native/ per evitare doppie voci in Spotlight
 rm -rf "$APP"
 
-echo "OK: $ROOT_APP (Universal arm64 + x86_64)"
+echo "OK: $ROOT_APP (Universal arm64 + x86_64, Native Rust Backend)"

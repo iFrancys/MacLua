@@ -44,8 +44,13 @@ final class Downloader {
 
         let bridge = MacLuaBridge.live
         let proc = Process()
-        proc.executableURL = bridge.pythonURL
-        proc.arguments = [bridge.scriptURL.path, "--json", "update", String(appid), "-j", "8"]
+        if let native = bridge.nativeBinaryURL {
+            proc.executableURL = native
+            proc.arguments = ["--json", "update", String(appid), "-j", "8"]
+        } else {
+            proc.executableURL = bridge.pythonURL
+            proc.arguments = [bridge.scriptURL.path, "--json", "update", String(appid), "-j", "8"]
+        }
 
         let pipe = Pipe()
         let errPipe = Pipe()
