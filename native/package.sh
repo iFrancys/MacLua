@@ -36,12 +36,13 @@ echo "-> Unione frontend Mach-O universale con lipo..."
 lipo -create /tmp/MacApp_arm64 /tmp/MacApp_x86_64 -output "$APP/Contents/MacOS/MacLua"
 rm -f /tmp/MacApp_arm64 /tmp/MacApp_x86_64
 
-echo "-> Unione backend Mach-O universale con lipo..."
+echo "-> Unione backend Mach-O universale con lipo (maclua-cli)..."
 lipo -create \
     ../rust/target/aarch64-apple-darwin/release/maclua \
     ../rust/target/x86_64-apple-darwin/release/maclua \
-    -output "$APP/Contents/Helpers/maclua"
-chmod 755 "$APP/Contents/Helpers/maclua"
+    -output "$APP/Contents/MacOS/maclua-cli"
+chmod 755 "$APP/Contents/MacOS/maclua-cli"
+cp "$APP/Contents/MacOS/maclua-cli" "$APP/Contents/Helpers/maclua-cli"
 
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
@@ -65,7 +66,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign - "$APP/Contents/Helpers/maclua" >/dev/null
+codesign --force --sign - "$APP/Contents/MacOS/maclua-cli" >/dev/null
+codesign --force --sign - "$APP/Contents/Helpers/maclua-cli" >/dev/null
 codesign --force --deep --sign - "$APP" >/dev/null
 
 echo "== installazione pulita =="

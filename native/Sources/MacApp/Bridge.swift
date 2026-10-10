@@ -133,32 +133,56 @@ struct GameDepotsResponse: Codable, Sendable, Identifiable, Equatable {
 // MARK: - Risoluzione Eseguibile Nativo / Script
 
 enum Locator {
+    static func isSafeAuxiliaryBinary(_ candidate: URL) -> Bool {
+        // PROTEZIONE RIGIDA CONTRO FORK BOMB / AUTO-INVOCAZIONE RICORSIVA:
+        // Su filesystem APFS case-insensitive, MacLua e maclua puntano allo stesso file.
+        // Se il candidato coincide (anche per maiuscole/minuscole) con l'eseguibile GUI corrente,
+        // lo rifiutiamo categoricamente.
+        if let currentExec = Bundle.main.executableURL {
+            let p1 = candidate.standardizedFileURL.path
+            let p2 = currentExec.standardizedFileURL.path
+            if p1.caseInsensitiveCompare(p2) == .orderedSame {
+                return false
+            }
+        }
+        return FileManager.default.isExecutableFile(atPath: candidate.path)
+    }
+
     static func nativeBinaryURL() -> URL? {
         if let root = ProcessInfo.processInfo.environment["MACLUA_ROOT"] {
-            let candidate = URL(fileURLWithPath: root).appending(path: "maclua")
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
+            for name in ["maclua-cli", "maclua"] {
+                let candidate = URL(fileURLWithPath: root).appending(path: name)
+                if isSafeAuxiliaryBinary(candidate) { return candidate }
+            }
         }
-        if let bin = Bundle.main.url(forAuxiliaryExecutable: "maclua") {
+        // Cerca prima il binario ausiliario dedicato "maclua-cli" (non collidente con MacLua)
+        if let bin = Bundle.main.url(forAuxiliaryExecutable: "maclua-cli"), isSafeAuxiliaryBinary(bin) {
             return bin
         }
-        let helper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/maclua")
-        if FileManager.default.isExecutableFile(atPath: helper.path) {
-            return helper
+        if let macosCLI = Bundle.main.executableURL?.deletingLastPathComponent().appending(path: "maclua-cli"),
+           isSafeAuxiliaryBinary(macosCLI) {
+            return macosCLI
         }
-        if let exec = Bundle.main.executableURL?.deletingLastPathComponent().appending(path: "maclua"),
-           FileManager.default.isExecutableFile(atPath: exec.path) {
-            return exec
+        let helpersCLI = Bundle.main.bundleURL.appending(path: "Contents/Helpers/maclua-cli")
+        if isSafeAuxiliaryBinary(helpersCLI) {
+            return helpersCLI
+        }
+        let helpers = Bundle.main.bundleURL.appending(path: "Contents/Helpers/maclua")
+        if isSafeAuxiliaryBinary(helpers) {
+            return helpers
         }
         var dir = Bundle.main.bundleURL
         for _ in 0..<5 {
             dir = dir.deletingLastPathComponent()
+            let candidateCli = dir.appending(path: "rust/target/release/maclua-cli")
+            if isSafeAuxiliaryBinary(candidateCli) { return candidateCli }
             let candidate = dir.appending(path: "rust/target/release/maclua")
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
+            if isSafeAuxiliaryBinary(candidate) { return candidate }
             let direct = dir.appending(path: "maclua")
-            if FileManager.default.isExecutableFile(atPath: direct.path) { return direct }
+            if isSafeAuxiliaryBinary(direct) { return direct }
         }
         let devPath = URL(fileURLWithPath: "/Users/ciccioomazz/Desktop/MacLua/rust/target/release/maclua")
-        if FileManager.default.isExecutableFile(atPath: devPath.path) { return devPath }
+        if isSafeAuxiliaryBinary(devPath) { return devPath }
         return nil
     }
 
