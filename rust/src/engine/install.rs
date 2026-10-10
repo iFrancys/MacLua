@@ -129,12 +129,23 @@ pub fn fix_executables<P: AsRef<Path>>(root: P) -> usize {
                                     }
                                     *fixed += 1;
 
-                                    // Firma ad-hoc il bundle .app per evitare SIGKILL da parte di taskgated su Apple Silicon
+                                    // Firma ad-hoc sia il binario .real sia il bundle .app per evitare SIGKILL da parte di taskgated su Apple Silicon
                                     #[cfg(target_os = "macos")]
-                                    if let Some(app_bundle) = dir.parent().and_then(|p| p.parent()) {
-                                        let _ = std::process::Command::new("codesign")
-                                            .args(["--force", "--deep", "--sign", "-", app_bundle.to_str().unwrap_or("")])
-                                            .status();
+                                    {
+                                        if let Some(real_str) = real_path.to_str() {
+                                            let _ = std::process::Command::new("/usr/bin/codesign")
+                                                .args(["--force", "--sign", "-", real_str])
+                                                .status();
+                                        }
+                                        if let Some(app_bundle) = dir.parent().and_then(|p| p.parent()) {
+                                            if app_bundle.extension().and_then(|e| e.to_str()) == Some("app") {
+                                                if let Some(bundle_str) = app_bundle.to_str() {
+                                                    let _ = std::process::Command::new("/usr/bin/codesign")
+                                                        .args(["--force", "--deep", "--sign", "-", bundle_str])
+                                                        .status();
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
                                     // Ripristino atomico in caso di errore di scrittura
