@@ -1,0 +1,22 @@
+.DS_Store
+*.swp
+*~
+
+# Build and compilation outputs
+.build/
+target/
+*.tmp
+*.tmp.*
+
+# App bundles
+MacLua.app/
+native/MacLua.app/
+
+# Pytest / Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# User & local state
+hook_manifest.json
+.managed.json
