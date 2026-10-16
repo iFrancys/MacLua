@@ -1,4 +1,4 @@
-# MacLua — Native Steam Integration & Game Manager for macOS
+# MacLua: Native Steam Integration & Game Manager for macOS
 
 [![Platform](https://img.shields.io/badge/Platform-macOS-black?logo=apple)](https://apple.com)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://www.python.org/)
@@ -22,7 +22,7 @@ It seamlessly integrates with Steam for Mac via local Chromium Embedded Framewor
 - **⚡ Plug & Play 1-Step Installation**:
   - Automated `install.sh` handles Python dependencies, LaunchAgent configuration, Steam CEF debugging hooks, and installs a global `maclua` terminal command.
 
-- **🔄 In-Place Delta Updates (No Data Loss)**:
+- **🔄 In-Place Delta Updates**:
   - Updates games without requiring full redownloads or uninstallation.
   - Compares existing file chunks using Adler32 verification and downloads only modified delta chunks from the Steam CDN, preserving user save data and configuration.
 
@@ -48,7 +48,7 @@ It seamlessly integrates with Steam for Mac via local Chromium Embedded Framewor
 
 ---
 
-## 🚀 Quick Start (Plug & Play)
+## 🚀 Quick Start
 
 ### 1. Installation
 
@@ -187,3 +187,5 @@ This project is licensed under the [MIT License](LICENSE) — see the [LICENSE](
 ## ⚠️ Disclaimer
 
 MacLua is developed for technical research, interoperability, and offline archival management on macOS. Please support game developers by purchasing original titles on Steam.
+
+AI was used to write code for this project. I’d also like to point out that I don’t have much time to keep up with the project, so I’d love for the community to maintain and improve it. So if you find any bugs or have ideas for improvements, that’s great for everyone :D
