@@ -388,10 +388,13 @@ def handle_rpc_request(path, method="GET", data=None):
 
         def _bg_update():
             try:
-                updates.apply_update(aid, home=home)
-                sync_library_in_steam(home)
-            except Exception:
-                pass
+                res = updates.apply_update(aid, home=home)
+                if isinstance(res, dict) and not res.get("ok", True) and res.get("error"):
+                    notify_macos("MacLua Aggiornamenti", res["error"])
+                else:
+                    sync_library_in_steam(home)
+            except Exception as e:
+                notify_macos("MacLua Aggiornamenti", f"Errore aggiornamento: {e}")
 
         threading.Thread(target=_bg_update, daemon=True).start()
         return {"ok": True, "appid": aid, "updating": True}
@@ -510,13 +513,57 @@ def get_managed_games(home=None):
     return games
 
 
+def refresh_steam_ui_tabs(tabs=None):
+    """Aggiorna le viste virtualizzate della libreria nei tab UI di Steam."""
+    if tabs is None:
+        try:
+            req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
+            with urllib.request.urlopen(req, timeout=0.8) as resp:
+                tabs = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return
+    for t in tabs:
+        if t.get("title") != "SharedJSContext" and t.get("webSocketDebuggerUrl"):
+            try:
+                c = cdp.CDPClient(t["webSocketDebuggerUrl"], timeout=1)
+                try:
+                    c.evaluate("""(() => {
+                        const listEl = document.querySelector('.ReactVirtualized__List');
+                        if (!listEl) return;
+                        const key = Object.keys(listEl).find(k => k.startsWith('__reactFiber'));
+                        let f = listEl[key];
+                        while (f) {
+                            if (f.stateNode && f.stateNode.m_rgAutorunDisposers) {
+                                const inst = f.stateNode;
+                                const sym = Object.getOwnPropertySymbols(inst).find(s => String(s).includes('mobx administration'));
+                                if (sym && inst[sym]) {
+                                    const adm = inst[sym];
+                                    const valObj = adm.values_?.get ? adm.values_.get('visibleRows') : adm.values_?.['visibleRows'];
+                                    if (valObj && valObj.derivation) {
+                                        valObj.value_ = valObj.derivation.call(valObj.scope_ || inst);
+                                        valObj.dependenciesState_ = 0;
+                                        if (typeof valObj.onBecomeStale_ === 'function') valObj.onBecomeStale_();
+                                        inst.forceUpdate();
+                                        return;
+                                    }
+                                }
+                            }
+                            f = f.return;
+                        }
+                    })()""")
+                finally:
+                    c.close()
+            except Exception:
+                pass
+
+
 def sync_library_in_steam(home=None):
     """Sincronizza in modo pulito e sicuro i giochi gestiti in SharedJSContext di Steam.
     - Riconcilia prima eventuali appmanifest bloccati da aggiornamenti PICS (StateFlags 6 -> 4).
-    - Imposta visible_in_game_list = true su appStore per tutti i giochi gestiti.
+    - Imposta visible_in_game_list = true e subscribed_to = true su appStore per tutti i giochi gestiti.
     - Per i giochi installati, assicura stato pronto (installed: true, display_status: 11 'GIOCA').
     - Per i giochi non installati, assicura stato pulito (installed: false, display_status: 9 'INSTALLA').
-    - Rispetta integralmente le collezioni dell'utente.
+    - Invalida la cache MobX su tutte le collezioni e aggiorna istantaneamente l'interfaccia UI.
     """
     home = home or os.path.expanduser("~")
     try:
@@ -566,6 +613,13 @@ def sync_library_in_steam(home=None):
                             app.visible_in_game_list = true;
                             modifiedCount++;
                         }}
+                        if (!app.subscribed_to) {{
+                            app.subscribed_to = true;
+                            modifiedCount++;
+                        }}
+                        if (app.is_subscribed !== true) {{
+                            app.is_subscribed = true;
+                        }}
                         if (installedSet.has(aid)) {{
                             try {{
                                 if (window.SteamClient?.Downloads?.RemoveFromDownloadList) {{
@@ -596,17 +650,31 @@ def sync_library_in_steam(home=None):
                     }}
                 }}
 
-                // Se uncategorizedCollection avesse un errore memorizzato nella cache MobX, ripristinalo
+                // Invalida e ricalcola la cache derivata visibleApps per TUTTE le collezioni utente e di sistema
                 try {{
                     const cs = window.collectionStore;
                     if (cs) {{
-                        const syms = Object.getOwnPropertySymbols(cs);
-                        if (syms.length > 0) {{
-                            const mobxAdm = cs[syms[0]];
-                            const valObj = mobxAdm?.values_?.get ? mobxAdm.values_.get('uncategorizedCollection') : mobxAdm?.values_?.['uncategorizedCollection'];
-                            if (valObj && valObj.value_ && typeof valObj.value_ === 'object' && 'cause' in valObj.value_) {{
-                                valObj.value_ = valObj.derivation.call(valObj.scope_);
-                                valObj.dependenciesState_ = 0;
+                        const allCols = [
+                            cs.uncategorizedCollection,
+                            ...(cs.userCollections || []),
+                            ...((cs.collectionsFromStorage && typeof cs.collectionsFromStorage.values === 'function') ? Array.from(cs.collectionsFromStorage.values()) : [])
+                        ];
+                        for (const col of allCols) {{
+                            if (!col) continue;
+                            const syms = Object.getOwnPropertySymbols(col);
+                            for (const sym of syms) {{
+                                const adm = col[sym];
+                                if (!adm || !adm.values_) continue;
+                                for (const prop of ['visibleApps', 'allApps']) {{
+                                    const valObj = adm.values_.get ? adm.values_.get(prop) : adm.values_[prop];
+                                    if (valObj && valObj.derivation) {{
+                                        try {{
+                                            valObj.value_ = valObj.derivation.call(valObj.scope_ || col);
+                                            valObj.dependenciesState_ = 0;
+                                            if (typeof valObj.onBecomeStale_ === 'function') valObj.onBecomeStale_();
+                                        }} catch (e) {{}}
+                                    }}
+                                }}
                             }}
                         }}
                     }}
@@ -620,9 +688,16 @@ def sync_library_in_steam(home=None):
             }})()
             """
             res_str = client.evaluate(script)
-            return json.loads(res_str) if res_str else {"ok": False, "error": "Nessuna risposta"}
+            res = json.loads(res_str) if res_str else {"ok": False, "error": "Nessuna risposta"}
         finally:
             client.close()
+
+        try:
+            refresh_steam_ui_tabs(tabs)
+        except Exception:
+            pass
+
+        return res
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

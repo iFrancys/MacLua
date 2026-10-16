@@ -583,11 +583,13 @@ def start_continuous_injector_daemon():
                             if m_app or m_dep or not has_forge:
                                 maclua._ensure(home)
                                 last_pkginfo_mtime = os.path.getmtime(pkginfo)
+                                if steamhook.is_cdp_available(0.1):
+                                    steamhook.sync_library_in_steam(home)
                     except Exception:
                         pass
 
                 # 2. Sincronizzazione libreria in SharedJSContext (solo se CDP è pronto)
-                if (tick < 5 or (now - last_library_sync) >= 15.0) and steamhook.is_cdp_available(0.1):
+                if (tick < 10 or (now - last_library_sync) >= 10.0) and steamhook.is_cdp_available(0.1):
                     res = steamhook.sync_library_in_steam(home)
                     if res and res.get("ok"):
                         last_library_sync = now

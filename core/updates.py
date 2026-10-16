@@ -104,6 +104,7 @@ def apply_update(appid, home=None, workers=8, progress=None):
         app_depots = []
     target_gids = {int(d["id"]): str(d["gid"]) for d in (app_depots or []) if d.get("gid")}
 
+    fetched = None
     try:
         fetched = source.fetch_from_sources(
             appid,
@@ -112,9 +113,35 @@ def apply_update(appid, home=None, workers=8, progress=None):
             auto_update=True,
             target_gids=target_gids,
         )
-        install.import_lua(appid, fetched["lua"], fetched["manifests"], home)
+        if fetched and fetched.get("manifests"):
+            install.import_lua(appid, fetched["lua"], fetched["manifests"], home)
     except Exception:
         pass
+
+    # Verifica se i manifest necessari per la versione target sono effettivamente presenti
+    store_dir = paths.sls_manifests(home)
+    depotcache_dir = paths.depotcache(home)
+    missing_targets = []
+    for dep, gid in target_gids.items():
+        fname = f"{dep}_{gid}.manifest"
+        if not (
+            os.path.exists(os.path.join(store_dir, fname))
+            or os.path.exists(os.path.join(depotcache_dir, fname))
+            or (fetched and fname in fetched.get("manifests", {}))
+        ):
+            missing_targets.append(dep)
+
+    # Se mancano i manifest della nuova versione pubblica e non sono stati scaricati
+    if missing_targets:
+        pub_b = ai.public_buildid(appid)
+        cur_b = get_installed_buildid(paths.steamapps(home), appid, store_dir=store_dir)
+        return {
+            "ok": False,
+            "error": f"L'aggiornamento alla build {pub_b} non è ancora disponibile nelle sorgenti pubbliche (in attesa di pubblicazione su Sushi/Hubcap). I file di gioco correnti (build {cur_b}) sono intatti e pienamente funzionanti.",
+            "current_buildid": cur_b,
+            "target_buildid": pub_b,
+            "manifest_missing": True,
+        }
 
     maclua._ensure(home)
     out = install.fetch_app(
