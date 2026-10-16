@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <!-- Maschera per il teschio: ritaglia orbite, naso, fessure dei denti e il cinturino della benda -->
+    <mask id="skull-cutout">
+      <rect width="1024" height="1024" fill="white" />
+      
+      <!-- Orbita sinistra (visibile) -->
+      <path d="M 326 485 C 345 483, 368 492, 372 508 C 375 525, 360 542, 336 544 C 312 545, 298 530, 300 508 C 302 490, 312 486, 326 485 Z" fill="black" />
+      
+      <!-- Benda da pirata (occhio destro) -->
+      <path d="M 388 475 C 415 473, 455 478, 466 490 C 474 515, 462 546, 434 548 C 402 550, 384 528, 384 495 Z" fill="black" />
+      
+      <!-- Cinturino della benda che attraversa la fronte e la tempia -->
+      <path d="M 282 400 Q 375 475 495 512" stroke="black" stroke-width="15" stroke-linecap="round" fill="none" />
+      
+      <!-- Cavità nasale -->
+      <path d="M 378 525 C 370 542, 358 564, 363 572 C 368 578, 374 570, 378 566 C 382 570, 388 578, 393 572 C 398 564, 386 542, 378 525 Z" fill="black" />
+      
+      <!-- Contorno di separazione zigomi/mascella -->
+      <path d="M 315 568 C 325 572, 332 580, 333 592" stroke="black" stroke-width="6" stroke-linecap="round" fill="none" />
+      <path d="M 441 568 C 431 572, 424 580, 423 592" stroke="black" stroke-width="6" stroke-linecap="round" fill="none" />
+
+      <!-- Linea di chiusura dei denti (bocca) -->
+      <path d="M 330 604 Q 378 622 426 604" stroke="black" stroke-width="8" stroke-linecap="round" fill="none" />
+      
+      <!-- Fessure verticali dei denti -->
+      <line x1="345" y1="594" x2="344" y2="617" stroke="black" stroke-width="5.5" stroke-linecap="round" />
+      <line x1="361" y1="597" x2="360" y2="622" stroke="black" stroke-width="5.5" stroke-linecap="round" />
+      <line x1="378" y1="598" x2="378" y2="624" stroke="black" stroke-width="5.5" stroke-linecap="round" />
+      <line x1="395" y1="597" x2="396" y2="622" stroke="black" stroke-width="5.5" stroke-linecap="round" />
+      <line x1="411" y1="594" x2="412" y2="617" stroke="black" stroke-width="5.5" stroke-linecap="round" />
+    </mask>
+
+    <!-- Maschera per l'incrocio delle ossa (effetto sovrapposizione autentico) -->
+    <mask id="bone-under-mask">
+      <rect width="1024" height="1024" fill="white" />
+      <!-- Tracciato ingrandito dell'osso superiore per creare lo stacco nero netto all'incrocio -->
+      <path d="M 255 612 L 501 726" stroke="black" stroke-width="46" stroke-linecap="round" />
+    </mask>
+  </defs>
+
+  <!-- 1. SFONDO ICONA (Stile macOS / iOS Squircle) -->
+  <rect x="24" y="24" width="976" height="976" rx="185" fill="#ffffff" stroke="#eeeeee" stroke-width="4" />
+
+  <!-- 2. LOGO APPLE ORIGINALE (Proporzioni ufficiali corrette) -->
+  <g id="apple-logo" transform="translate(-85, 30) scale(41)">
+    <path fill="#000000" d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5ZM13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z" />
+  </g>
+
+  <!-- 3. CATENA / PISTONE DI STEAM (Posizionato nel morso della mela) -->
+  <g id="steam-mechanism">
+    <!-- 1. Stacco bianco uniforme per l'asta che entra nella mela -->
+    <path d="M 715 608 L 560 524" stroke="#ffffff" stroke-width="64" stroke-linecap="round" />
+    
+    <!-- 2. Corpo nero dell'asta con testa arrotondata -->
+    <path d="M 715 608 L 560 524" stroke="#000000" stroke-width="40" stroke-linecap="round" />
+
+    <!-- 3. Corpo principale del braccio/biella grande di Steam (destra) -->
+    <path d="M 753 505 L 698 564 L 748 634 L 823 595 Z" fill="#000000" />
+    
+    <!-- 4. Ruota superiore destra del pistone Steam -->
+    <circle cx="835" cy="515" r="85" fill="#000000" />
+    <circle cx="835" cy="515" r="52" fill="#ffffff" />
+    <circle cx="835" cy="515" r="36" fill="#000000" />
+
+    <!-- 5. Contorno bianco di stacco per lo snodo inferiore (12px uniforme) -->
+    <circle cx="715" cy="608" r="58" fill="#ffffff" />
+    
+    <!-- 6. Anello esterno dello snodo inferiore di Steam -->
+    <circle cx="715" cy="608" r="46" fill="#000000" />
+    <circle cx="715" cy="608" r="31" fill="#ffffff" />
+    <circle cx="715" cy="608" r="20" fill="#000000" />
+  </g>
+
+  <!-- 4. TESCHIO PIRATA E OSSA INCROCIATE (All'interno della mela) -->
+  <g id="pirate-skull">
+    
+    <!-- Osso incrociato inferiore (da basso-sinistra ad alto-destra, passa sotto) -->
+    <g mask="url(#bone-under-mask)">
+      <path d="M 255 726 L 501 612" stroke="#ffffff" stroke-width="28" stroke-linecap="round" />
+      <!-- Epifisi (teste dell'osso) in basso a sinistra -->
+      <circle cx="244" cy="713" r="19" fill="#ffffff" />
+      <circle cx="261" cy="744" r="19" fill="#ffffff" />
+      <!-- Epifisi (teste dell'osso) in alto a destra -->
+      <circle cx="495" cy="594" r="19" fill="#ffffff" />
+      <circle cx="512" cy="625" r="19" fill="#ffffff" />
+    </g>
+
+    <!-- Osso incrociato superiore (da alto-sinistra a basso-destra, passa sopra) -->
+    <g>
+      <path d="M 255 612 L 501 726" stroke="#ffffff" stroke-width="28" stroke-linecap="round" />
+      <!-- Epifisi (teste dell'osso) in alto a sinistra -->
+      <circle cx="261" cy="594" r="19" fill="#ffffff" />
+      <circle cx="244" cy="625" r="19" fill="#ffffff" />
+      <!-- Epifisi (teste dell'osso) in basso a destra -->
+      <circle cx="512" cy="713" r="19" fill="#ffffff" />
+      <circle cx="495" cy="744" r="19" fill="#ffffff" />
+    </g>
+
+    <!-- Cranio, zigomi e mascella (con dettagli intagliati tramite maschera) -->
+    <g mask="url(#skull-cutout)">
+      <!-- Calotta cranica e zigomi -->
+      <path d="M 378 368
+               C 305 368, 266 418, 274 480
+               C 276 496, 283 508, 286 516
+               C 278 532, 276 550, 288 562
+               C 298 570, 318 570, 326 578
+               L 334 612
+               C 336 632, 355 648, 378 648
+               C 401 648, 420 632, 422 612
+               L 430 578
+               C 438 570, 458 570, 468 562
+               C 480 550, 478 532, 470 516
+               C 473 508, 480 496, 482 480
+               C 490 418, 451 368, 378 368 Z" fill="#ffffff" />
+    </g>
+  </g>
+</svg>
