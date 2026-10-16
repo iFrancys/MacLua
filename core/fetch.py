@@ -108,26 +108,40 @@ def download_file(depot, entry, key, bases, out_root, workers=8, progress=None):
         return c["offset"], plain
 
     needed = list(range(len(chunks)))
-    sized_ok = os.path.exists(dest) and os.path.getsize(dest) == entry["size"]
-    if sized_ok:
+    exists_on_disk = os.path.exists(dest)
+    sized_ok = exists_on_disk and os.path.getsize(dest) == entry["size"]
+    reused_bytes = 0
+    if exists_on_disk:
         try:
             with open(dest, "rb") as f:
                 present = f.read()
             needed = []
             for i, c in enumerate(chunks):
-                seg = present[c["offset"]:c["offset"] + c["cb_original"]]
+                end_off = c["offset"] + c["cb_original"]
+                seg = present[c["offset"]:end_off] if end_off <= len(present) else b""
                 if len(seg) != c["cb_original"] or adler0(seg) != c["crc"]:
                     needed.append(i)
+                else:
+                    reused_bytes += c["cb_original"]
         except OSError:
             needed = list(range(len(chunks)))
+            reused_bytes = 0
+            exists_on_disk = False
+            sized_ok = False
     if not needed:
+        if not sized_ok and exists_on_disk:
+            with open(dest, "r+b") as f:
+                f.truncate(entry["size"])
         if progress:
             progress(entry["size"])
         if flags & FLAG_EXECUTABLE:
             os.chmod(dest, 0o755)
         return ("file", rel)
 
-    with open(dest, "r+b" if sized_ok else "wb") as f:
+    if progress and reused_bytes > 0:
+        progress(reused_bytes)
+
+    with open(dest, "r+b" if exists_on_disk else "wb") as f:
         if not sized_ok:
             f.truncate(entry["size"])
         if len(needed) == 1:

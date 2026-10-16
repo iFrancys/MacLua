@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::keyvalues::KeyValues;
 
-/// Checks if an app is installed on disk.
+/// Checks if an app is installed on disk (including when an update is pending with StateFlags 6).
 pub fn is_game_installed<P: AsRef<Path>>(steamapps_dir: P, appid: u32) -> bool {
     let acf_path = steamapps_dir.as_ref().join(format!("appmanifest_{}.acf", appid));
     if !acf_path.is_file() {
@@ -15,13 +15,15 @@ pub fn is_game_installed<P: AsRef<Path>>(steamapps_dir: P, appid: u32) -> bool {
     if let Ok(content) = std::fs::read_to_string(&acf_path) {
         if let Ok(kv) = KeyValues::parse(&content) {
             if let Some((_, root)) = kv.root.iter().find(|(k, _)| k.eq_ignore_ascii_case("AppState")) {
-                let flags = root.get_str("StateFlags").unwrap_or("0");
-                if flags == "4" {
+                let flags = root.get_str("StateFlags").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                let size = root.get_str("SizeOnDisk").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                if (flags & 4) != 0 || size > 0 {
                     if let Some(installdir) = root.get_str("installdir") {
                         let g_dir = steamapps_dir.as_ref().join("common").join(installdir);
-                        return g_dir.is_dir();
+                        return g_dir.is_dir()
+                            && std::fs::read_dir(&g_dir).map(|mut it| it.next().is_some()).unwrap_or(false);
                     }
-                    return true;
+                    return (flags & 4) != 0;
                 }
             }
         }
@@ -56,6 +58,46 @@ pub fn create_appmanifest<P: AsRef<Path>>(
     }
     std::fs::rename(&tmp, &acf_path)?;
     Ok(acf_path)
+}
+
+/// Cleans up fake / broken appmanifest files with StateFlags 2 or 18 (Download requested / Update queued)
+/// when the game has no actual files on disk in common/. This restores Steam's clean, native
+/// interface showing normal "Install" button with proper MB/GB calculation.
+pub fn cleanup_broken_appmanifests<P: AsRef<Path>>(steamapps_dir: P) -> Vec<u32> {
+    let mut cleaned = Vec::new();
+    let dir = steamapps_dir.as_ref();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                if file_name.starts_with("appmanifest_") && file_name.ends_with(".acf") {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        if let Ok(kv) = KeyValues::parse(&content) {
+                            if let Some((_, root)) = kv.root.iter().find(|(k, _)| k.eq_ignore_ascii_case("AppState")) {
+                                let flags = root.get_str("StateFlags").unwrap_or("0");
+                                let size = root.get_str("SizeOnDisk").unwrap_or("0");
+                                if (flags == "2" || flags == "18") && size == "0" {
+                                    let installdir = root.get_str("installdir").unwrap_or("");
+                                    let has_files = if !installdir.is_empty() {
+                                        let common_dir = dir.join("common").join(installdir);
+                                        common_dir.is_dir() && std::fs::read_dir(&common_dir).map(|mut it| it.next().is_some()).unwrap_or(false)
+                                    } else {
+                                        false
+                                    };
+                                    if !has_files {
+                                        let appid = root.get_str("appid").and_then(|a| a.parse::<u32>().ok()).unwrap_or(0);
+                                        let _ = std::fs::remove_file(&path);
+                                        cleaned.push(appid);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cleaned
 }
 
 const LAUNCHER_HELPER: &[u8] = include_bytes!("../../../assets/launcher_helper");

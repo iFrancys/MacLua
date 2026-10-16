@@ -10,3 +10,4 @@ pub mod lua;
 pub mod depotkeys;
 pub mod catalog;
 pub mod install;
+pub mod sources;

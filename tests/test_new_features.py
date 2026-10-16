@@ -3,9 +3,24 @@ Settings, NetResilience (DoH), AppCache, Vault, Fixes, Updates, Collections, Que
 """
 import os
 import json
+import subprocess
 import time
 import pytest
 from core import settings, netresil, appcache, vault, fixes, updates, collections as coll_mod, queue, steamhook, bridge
+
+
+def test_install_bridge_agent_writes_plist(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append(args))
+    res = steamhook.install_bridge_agent(python_path="/usr/bin/python3", script_path="/x/maclua.py", home=str(tmp_path))
+    plist = steamhook.bridge_agent_path(str(tmp_path))
+    assert res["ok"] is True
+    assert os.path.exists(plist)
+    with open(plist) as f:
+        content = f.read()
+    assert "dev.maclua.bridge" in content
+    assert "<string>serve</string>" in content
+    assert any(c[0] == "launchctl" for c in calls)
 
 
 def test_settings_get_set(tmp_path, monkeypatch):
@@ -118,9 +133,14 @@ def test_steamhook_enable_disable(tmp_path, monkeypatch):
     steam_root = str(tmp_path / "Steam")
     os.makedirs(steam_root, exist_ok=True)
     monkeypatch.setattr(steamhook.paths, "steam_root", lambda home=None: steam_root)
+    monkeypatch.setattr(steamhook, "_candidate_markers", lambda home=None: [os.path.join(steam_root, ".cef-enable-remote-debugging")])
+    monkeypatch.setattr(steamhook, "bridge_agent_path", lambda home=None: str(tmp_path / "dev.maclua.bridge.plist"))
     monkeypatch.setattr(steamhook, "HOOK_DIR", str(tmp_path / "MacLua"))
     monkeypatch.setattr(steamhook, "MANIFEST_FILE", str(tmp_path / "MacLua" / "hook_manifest.json"))
     monkeypatch.setattr(steamhook, "TOKEN_FILE", str(tmp_path / "MacLua" / "bridge_token"))
+    # Mai parlare con launchd nei test: il label del plist è reale, un unload per path
+    # scaricherebbe il servizio vero dell'utente.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
 
     token = steamhook.get_or_create_token()
     assert len(token) >= 32
@@ -130,3 +150,37 @@ def test_steamhook_enable_disable(tmp_path, monkeypatch):
 
     dis = steamhook.disable_hook()
     assert not os.path.exists(os.path.join(steam_root, ".cef-enable-remote-debugging"))
+
+
+def test_multidatabase_settings_and_rpc(tmp_path, monkeypatch):
+    s_file = str(tmp_path / "settings.json")
+    monkeypatch.setattr(settings, "SETTINGS_FILE", s_file)
+    monkeypatch.setattr(settings, "SETTINGS_DIR", str(tmp_path))
+    from core import config
+    monkeypatch.setattr(config, "config_dir", lambda home=None: str(tmp_path))
+    monkeypatch.setattr(config, "key_file", lambda home=None: str(tmp_path / "config.json"))
+
+    settings.set_val("preferred_source", "sushi")
+    settings.set_val("hubcap_key", "smm_test123")
+    settings.set_val("donate_keys", True)
+
+    assert settings.get("preferred_source") == "sushi"
+    assert settings.get("hubcap_key") == "smm_test123"
+    assert settings.get("donate_keys") is True
+
+
+def test_steamhook_rpc_endpoints(tmp_path, monkeypatch):
+    monkeypatch.setattr(steamhook.paths, "steamapps", lambda home=None: str(tmp_path))
+    monkeypatch.setattr(steamhook.paths, "stplug_in", lambda home=None: str(tmp_path / "stplug-in"))
+
+    # Test /api-list
+    res = steamhook.handle_rpc_request("/api-list")
+    assert res["ok"] is True
+    assert any(s["id"] == "sushi" for s in res["sources"])
+    assert any(s["id"] == "ryuu" for s in res["sources"])
+    assert any(s["id"] == "hubcap" for s in res["sources"])
+
+    # Test /cleanup-manifests
+    res_clean = steamhook.handle_rpc_request("/cleanup-manifests", method="POST")
+    assert res_clean["ok"] is True
+    assert "cleaned" in res_clean

@@ -6,10 +6,7 @@
  * - Usa il canale bidirezionale CDP RPC per comunicare stabilmente con MacLua senza blocchi di mixed-content.
  */
 (function () {
-  const isStore = typeof location !== "undefined" && location.hostname === "store.steampowered.com";
-  const isLibrary = typeof location !== "undefined" && (location.hostname === "steamloopback.host" || location.hostname === "localhost");
-
-  if (!isStore && !isLibrary) {
+  if (typeof location === "undefined" || location.hostname !== "store.steampowered.com") {
     return;
   }
 
@@ -68,7 +65,234 @@
     }
   }
 
-  // 3. Modal Impostazioni Semplice & Completo (Stile LuaTools)
+  const I18N = {
+    en: {
+      title: "MacLua Settings",
+      language: "Language",
+      sources: "Manifest Sources & Database",
+      srcAuto: "Auto (Sushi, Ryuu, Hubcap)",
+      srcSushi: "Sushi (GitHub Raw - Free)",
+      srcRyuu: "Ryuu (Anonymous - Free)",
+      srcHubcap: "Hubcap / Morrenus (Requires Key)",
+      apiKey: "Morrenus / Hubcap API Key",
+      maintenance: "Maintenance",
+      repairBtn: "🧹 Repair Steam Library",
+      restartBtn: "↻ Restart Steam",
+      managedGames: "Managed Games in Library",
+      loadingGames: "Loading games...",
+      noGames: "No managed games found.",
+      installed: "Installed",
+      remove: "Remove",
+      close: "Close",
+      save: "Save Settings",
+      saving: "Saving...",
+      saved: "✓ Settings saved successfully!",
+      saveError: "Error saving settings.",
+      cleaning: "Repairing Steam Library...",
+      cleaned: "✓ Steam Library repaired successfully!",
+      restarting: "Restarting Steam...",
+      removedGame: "Removed {name} from MacLua.",
+      removeError: "Error removing game.",
+      addBtn: "Add with MacLua",
+      adding: "Adding with MacLua...",
+      addedBtn: "✓ Added with MacLua",
+      playBtn: "▶ Play with MacLua",
+      removeBtnHeader: "✕ Remove from MacLua",
+      removing: "Removing...",
+      addedToast: "Game added successfully{src}! Restart Steam to see it in Library.",
+      alreadyAddedToast: "Game already added to MacLua. You can install it from Steam Library!",
+      restartHeaderBtn: "↻ Restart Steam",
+      updateGame: "Update",
+      updatingGame: "Updating...",
+      updatedToast: "✓ In-place update started for {name}!",
+    },
+    it: {
+      title: "MacLua Impostazioni",
+      language: "Lingua",
+      sources: "Sorgenti Manifest e Database",
+      srcAuto: "Auto (Sushi, Ryuu, Hubcap)",
+      srcSushi: "Sushi (GitHub Raw - Gratuito)",
+      srcRyuu: "Ryuu (Anonimo - Gratuito)",
+      srcHubcap: "Hubcap / Morrenus (Richiede Chiave)",
+      apiKey: "Chiave API Morrenus / Hubcap",
+      maintenance: "Manutenzione",
+      repairBtn: "🧹 Ripara Libreria Steam",
+      restartBtn: "↻ Riavvia Steam",
+      managedGames: "Giochi Gestiti nella Libreria",
+      loadingGames: "Caricamento giochi...",
+      noGames: "Nessun gioco gestito trovato.",
+      installed: "Installato",
+      remove: "Rimuovi",
+      close: "Chiudi",
+      save: "Salva Impostazioni",
+      saving: "Salvataggio...",
+      saved: "✓ Impostazioni salvate con successo!",
+      saveError: "Errore durante il salvataggio.",
+      cleaning: "Riparazione libreria in corso...",
+      cleaned: "✓ Libreria Steam riparata con successo!",
+      restarting: "Riavvio di Steam in corso...",
+      removedGame: "Rimosso {name} da MacLua.",
+      removeError: "Errore durante la rimozione.",
+      addBtn: "Aggiungi con MacLua",
+      adding: "Aggiunta in corso...",
+      addedBtn: "✓ Aggiunto con MacLua",
+      playBtn: "▶ Gioca con MacLua",
+      removeBtnHeader: "✕ Rimuovi da MacLua",
+      removing: "Rimozione in corso...",
+      addedToast: "Gioco aggiunto con successo{src}! Riavvia Steam per vederlo nella Libreria.",
+      alreadyAddedToast: "Gioco già aggiunto a MacLua. Puoi scaricarlo direttamente dalla Libreria!",
+      restartHeaderBtn: "↻ Riavvia Steam",
+      updateGame: "Aggiorna",
+      updatingGame: "Aggiornamento...",
+      updatedToast: "✓ Aggiornamento in-place avviato per {name}!",
+    },
+    de: {
+      title: "MacLua Einstellungen",
+      language: "Sprache",
+      sources: "Manifest-Quellen & Datenbank",
+      srcAuto: "Auto (Sushi, Ryuu, Hubcap)",
+      srcSushi: "Sushi (GitHub Raw - Kostenlos)",
+      srcRyuu: "Ryuu (Anonym - Kostenlos)",
+      srcHubcap: "Hubcap / Morrenus (Erfordert Schlüssel)",
+      apiKey: "Morrenus / Hubcap API-Schlüssel",
+      maintenance: "Wartung",
+      repairBtn: "🧹 Steam-Bibliothek reparieren",
+      restartBtn: "↻ Steam neu starten",
+      managedGames: "Verwaltete Spiele in der Bibliothek",
+      loadingGames: "Spiele werden geladen...",
+      noGames: "Keine verwalteten Spiele gefunden.",
+      installed: "Installiert",
+      remove: "Entfernen",
+      close: "Schließen",
+      save: "Einstellungen speichern",
+      saving: "Speichern...",
+      saved: "✓ Einstellungen erfolgreich gespeichert!",
+      saveError: "Fehler beim Speichern der Einstellungen.",
+      cleaning: "Steam-Bibliothek wird repariert...",
+      cleaned: "✓ Steam-Bibliothek erfolgreich repariert!",
+      restarting: "Steam wird neu gestartet...",
+      removedGame: "{name} aus MacLua entfernt.",
+      removeError: "Fehler beim Entfernen des Spiels.",
+      addBtn: "Mit MacLua hinzufügen",
+      adding: "Wird hinzugefügt...",
+      addedBtn: "✓ Mit MacLua hinzugefügt",
+      playBtn: "▶ Mit MacLua spielen",
+      removeBtnHeader: "✕ Aus MacLua entfernen",
+      removing: "Wird entfernt...",
+      addedToast: "Spiel erfolgreich hinzugefügt{src}! Steam neu starten, um es in der Bibliothek zu sehen.",
+      alreadyAddedToast: "Spiel bereits zu MacLua hinzugefügt. Sie können es aus der Steam-Bibliothek installieren!",
+      restartHeaderBtn: "↻ Steam neu starten",
+      updateGame: "Aktualisieren",
+      updatingGame: "Aktualisiere...",
+      updatedToast: "✓ In-Place-Update gestartet für {name}!",
+    },
+    es: {
+      title: "MacLua Ajustes",
+      language: "Idioma",
+      sources: "Fuentes de Manifest y Base de Datos",
+      srcAuto: "Auto (Sushi, Ryuu, Hubcap)",
+      srcSushi: "Sushi (GitHub Raw - Gratis)",
+      srcRyuu: "Ryuu (Anónimo - Gratis)",
+      srcHubcap: "Hubcap / Morrenus (Requiere Clave)",
+      apiKey: "Clave API Morrenus / Hubcap",
+      maintenance: "Mantenimiento",
+      repairBtn: "🧹 Reparar Biblioteca de Steam",
+      restartBtn: "↻ Reiniciar Steam",
+      managedGames: "Juegos Administrados en la Biblioteca",
+      loadingGames: "Cargando juegos...",
+      noGames: "No se encontraron juegos administrados.",
+      installed: "Instalado",
+      remove: "Eliminar",
+      close: "Cerrar",
+      save: "Guardar Ajustes",
+      saving: "Guardando...",
+      saved: "✓ ¡Ajustes guardados con éxito!",
+      saveError: "Error al guardar los ajustes.",
+      cleaning: "Reparando biblioteca de Steam...",
+      cleaned: "✓ ¡Biblioteca de Steam reparada con éxito!",
+      restarting: "Reiniciando Steam...",
+      removedGame: "Se ha eliminado {name} de MacLua.",
+      removeError: "Error al eliminar el juego.",
+      addBtn: "Añadir con MacLua",
+      adding: "Añadiendo...",
+      addedBtn: "✓ Añadido con MacLua",
+      playBtn: "▶ Jugar con MacLua",
+      removeBtnHeader: "✕ Eliminar de MacLua",
+      removing: "Eliminando...",
+      addedToast: "¡Juego añadido con éxito{src}! Reinicia Steam para verlo en la Biblioteca.",
+      alreadyAddedToast: "¡Juego ya añadido a MacLua. Puedes instalarlo desde la Biblioteca de Steam!",
+      restartHeaderBtn: "↻ Reiniciar Steam",
+      updateGame: "Actualizar",
+      updatingGame: "Actualizando...",
+      updatedToast: "✓ ¡Actualización in-place iniciada para {name}!",
+    },
+    fr: {
+      title: "MacLua Paramètres",
+      language: "Langue",
+      sources: "Sources de Manifest et Base de Données",
+      srcAuto: "Auto (Sushi, Ryuu, Hubcap)",
+      srcSushi: "Sushi (GitHub Raw - Gratuit)",
+      srcRyuu: "Ryuu (Anonyme - Gratuit)",
+      srcHubcap: "Hubcap / Morrenus (Clé requise)",
+      apiKey: "Clé API Morrenus / Hubcap",
+      maintenance: "Maintenance",
+      repairBtn: "🧹 Réparer la bibliothèque Steam",
+      restartBtn: "↻ Redémarrer Steam",
+      managedGames: "Jeux gérés dans la bibliothèque",
+      loadingGames: "Chargement des jeux...",
+      noGames: "Aucun jeu géré trouvé.",
+      installed: "Installé",
+      remove: "Supprimer",
+      close: "Fermer",
+      save: "Enregistrer les paramètres",
+      saving: "Enregistrement...",
+      saved: "✓ Paramètres enregistrés avec succès !",
+      saveError: "Erreur lors de l'enregistrement des paramètres.",
+      cleaning: "Réparation de la bibliothèque Steam...",
+      cleaned: "✓ Bibliothèque Steam réparée avec succès !",
+      restarting: "Redémarrage de Steam...",
+      removedGame: "{name} retiré de MacLua.",
+      removeError: "Erreur lors de la suppression du jeu.",
+      addBtn: "Ajouter avec MacLua",
+      adding: "Ajout en cours...",
+      addedBtn: "✓ Ajouté avec MacLua",
+      playBtn: "▶ Jouer avec MacLua",
+      removeBtnHeader: "✕ Supprimer de MacLua",
+      removing: "Suppression...",
+      addedToast: "Jeu ajouté avec succès{src} ! Redémarrez Steam pour le voir dans la bibliothèque.",
+      alreadyAddedToast: "Jeu déjà ajouté à MacLua. Vous pouvez l'installer depuis la bibliothèque Steam !",
+      restartHeaderBtn: "↻ Redémarrer Steam",
+      updateGame: "Mettre à jour",
+      updatingGame: "Mise à jour...",
+      updatedToast: "✓ Mise à jour in-place démarrée pour {name} !",
+    }
+  };
+
+  function getLang() {
+    try {
+      return localStorage.getItem("maclua_lang") || "en";
+    } catch (e) {
+      return "en";
+    }
+  }
+
+  function setLang(lang) {
+    try {
+      localStorage.setItem("maclua_lang", lang);
+    } catch (e) {}
+  }
+
+  function t(key, vars = {}) {
+    const lang = getLang();
+    const dict = I18N[lang] || I18N.en;
+    let str = dict[key] || I18N.en[key] || key;
+    for (const [k, v] of Object.entries(vars)) {
+      str = str.replace(new RegExp(`\\{${k}\\}`, "g"), v);
+    }
+    return str;
+  }
+
+  // 3. Modal Impostazioni Semplice & Completo
   async function openSettingsModal() {
     let overlay = document.getElementById("maclua-settings-overlay");
     if (overlay) {
@@ -79,82 +303,73 @@
     overlay.id = "maclua-settings-overlay";
     overlay.className = "maclua-modal-overlay";
 
+    const curLang = getLang();
+
     overlay.innerHTML = `
       <div class="maclua-modal-content">
         <div class="maclua-modal-header">
           <div class="maclua-modal-title">
             <img src="${MACLUA_ICON_B64}" class="maclua-title-logo" alt="Logo" />
-            <span>MacLua — Impostazioni</span>
+            <span>${t("title")}</span>
           </div>
           <button class="maclua-modal-close" id="maclua-modal-close">✕</button>
         </div>
 
         <div class="maclua-modal-body">
-          <!-- Scelta Database / Sorgente -->
+          <!-- Scelta Lingua / Language Selection -->
           <div class="maclua-setting-group">
-            <label class="maclua-setting-label">Database & Sorgenti Manifest (stile LuaTools)</label>
-            <div class="maclua-setting-desc">Seleziona la sorgente per scaricare file Lua e manifest:</div>
-            <select id="maclua-cfg-source" class="maclua-select">
-              <option value="auto">Auto (Sushi ➔ Ryuu ➔ Hubcap) [Consigliato]</option>
-              <option value="sushi">Sushi (GitHub Raw — 100% Gratuito, nessuna chiave)</option>
-              <option value="ryuu">Ryuu (Anonimo — Gratuito, nessuna chiave)</option>
-              <option value="hubcap">Hubcap / Morrenus (Richiede chiave API)</option>
+            <label class="maclua-setting-label">${t("language")}</label>
+            <select id="maclua-cfg-lang" class="maclua-select">
+              <option value="en" ${curLang === "en" ? "selected" : ""}>English</option>
+              <option value="it" ${curLang === "it" ? "selected" : ""}>Italiano</option>
+              <option value="de" ${curLang === "de" ? "selected" : ""}>Deutsch</option>
+              <option value="es" ${curLang === "es" ? "selected" : ""}>Español</option>
+              <option value="fr" ${curLang === "fr" ? "selected" : ""}>Français</option>
             </select>
           </div>
 
-          <!-- Chiave API Hubcap -->
+          <!-- Scelta Database / Sorgente (senza snake_case, senza stile LuaTools, senza sottotitoli) -->
           <div class="maclua-setting-group">
-            <label class="maclua-setting-label">Chiave API Morrenus / Hubcap (Opzionale)</label>
-            <div class="maclua-setting-desc">Necessaria solo se usi Hubcap. Non è richiesta per Sushi o Ryuu.</div>
+            <label class="maclua-setting-label">${t("sources")}</label>
+            <select id="maclua-cfg-source" class="maclua-select">
+              <option value="auto">${t("srcAuto")}</option>
+              <option value="sushi">${t("srcSushi")}</option>
+              <option value="ryuu">${t("srcRyuu")}</option>
+              <option value="hubcap">${t("srcHubcap")}</option>
+            </select>
+          </div>
+
+          <!-- Chiave API Hubcap (senza sottotitoli) -->
+          <div class="maclua-setting-group">
+            <label class="maclua-setting-label">${t("apiKey")}</label>
             <input type="password" id="maclua-cfg-key" class="maclua-input" placeholder="smm_..." autocomplete="off" />
           </div>
 
-          <!-- Opzioni Switch -->
-          <div class="maclua-setting-group maclua-toggles">
-            <label class="maclua-toggle-item">
-              <input type="checkbox" id="maclua-cfg-autoupdate" checked />
-              <span class="maclua-toggle-text">
-                <strong>Auto-Update Giochi (Aggiorna automaticamente i manifest)</strong>
-                <small>Sblocca i manifest bloccati nei file Lua per consentire a Steam di scaricare sempre l'ultima build disponibile.</small>
-              </span>
-            </label>
-            <label class="maclua-toggle-item">
-              <input type="checkbox" id="maclua-cfg-donate" />
-              <span class="maclua-toggle-text">
-                <strong>Dona manifest e chiavi</strong>
-                <small>Condividi anonimamente i manifest con la community.</small>
-              </span>
-            </label>
-          </div>
-
-          <!-- Azioni di Manutenzione -->
+          <!-- Azioni di Manutenzione (senza testi descrittivi ridondanti) -->
           <div class="maclua-setting-group">
-            <label class="maclua-setting-label">Manutenzione & Riparazione Libreria</label>
+            <label class="maclua-setting-label">${t("maintenance")}</label>
             <div class="maclua-actions-row">
               <button id="maclua-act-cleanup" class="maclua-btn maclua-btn-secondary">
-                🧹 Ripara Visualizzazione Steam
+                ${t("repairBtn")}
               </button>
               <button id="maclua-act-restart" class="maclua-btn maclua-btn-secondary">
-                ↻ Riavvia Steam
+                ${t("restartBtn")}
               </button>
             </div>
-            <small style="color: #94a3b8; display: block; margin-top: 4px;">
-              Rimuove gli appmanifest fantasma a 0 byte che causano la scritta 'DOWNLOAD RICHIESTO' e ripristina il classico tasto 'INSTALLA'.
-            </small>
           </div>
 
           <!-- Libreria Gestita -->
           <div class="maclua-setting-group">
-            <label class="maclua-setting-label">Giochi Gestiti nella Libreria</label>
+            <label class="maclua-setting-label">${t("managedGames")}</label>
             <div id="maclua-managed-list" class="maclua-managed-list">
-              <div style="color: #94a3b8; padding: 6px; font-size: 12px;">Caricamento giochi...</div>
+              <div style="color: #94a3b8; padding: 6px; font-size: 12px;">${t("loadingGames")}</div>
             </div>
           </div>
         </div>
 
         <div class="maclua-modal-footer">
-          <button id="maclua-btn-cancel" class="maclua-btn maclua-btn-cancel">Chiudi</button>
-          <button id="maclua-btn-save" class="maclua-btn maclua-btn-primary">Salva Impostazioni</button>
+          <button id="maclua-btn-cancel" class="maclua-btn maclua-btn-cancel">${t("close")}</button>
+          <button id="maclua-btn-save" class="maclua-btn maclua-btn-primary">${t("save")}</button>
         </div>
       </div>
     `;
@@ -171,195 +386,233 @@
       if (e.target === overlay) close();
     };
 
-    // Carica impostazioni attuali dal bridge
-    const cfgRes = await api("/settings");
-    const cfg = (cfgRes && (cfgRes.settings || cfgRes)) || {};
-
     const srcSel = overlay.querySelector("#maclua-cfg-source");
-    if (cfg.preferred_source) srcSel.value = cfg.preferred_source;
-
     const keyInp = overlay.querySelector("#maclua-cfg-key");
-    if (cfg.hubcap_key) keyInp.value = cfg.hubcap_key;
+    const langSel = overlay.querySelector("#maclua-cfg-lang");
 
-    const autoUpChk = overlay.querySelector("#maclua-cfg-autoupdate");
-    autoUpChk.checked = cfg.auto_update_apps !== false;
+    langSel.onchange = () => {
+      const selected = langSel.value;
+      setLang(selected);
+      const prevSource = srcSel.value;
+      const prevKey = keyInp.value;
+      openSettingsModal().then(() => {
+        const newOverlay = document.getElementById("maclua-settings-overlay");
+        if (newOverlay) {
+          const newSrc = newOverlay.querySelector("#maclua-cfg-source");
+          const newKey = newOverlay.querySelector("#maclua-cfg-key");
+          if (newSrc && prevSource) newSrc.value = prevSource;
+          if (newKey && prevKey) newKey.value = prevKey;
+        }
+      });
+    };
 
-    const donateChk = overlay.querySelector("#maclua-cfg-donate");
-    donateChk.checked = Boolean(cfg.donate_keys);
-
-    // Carica lista giochi gestiti
-    async function refreshLibrary() {
+    function renderGames(games) {
       const listEl = overlay.querySelector("#maclua-managed-list");
-      const libRes = await api("/library");
-      const games = (libRes && libRes.games) || [];
-      if (!games.length) {
-        listEl.innerHTML = `<div style="color: #94a3b8; padding: 6px; font-size: 12px;">Nessun gioco gestito in stplug-in.</div>`;
+      if (!listEl) return;
+      if (!games || !games.length) {
+        listEl.innerHTML = `<div style="color: #94a3b8; padding: 6px; font-size: 12px;">${t("noGames")}</div>`;
         return;
       }
       listEl.innerHTML = "";
       for (const g of games) {
         const item = document.createElement("div");
         item.className = "maclua-game-item";
+        const installedBadge = g.installed
+          ? `<span style="margin-left: 8px; font-size: 10px; color: #22c55e; font-weight: 700;">[${t("installed")}]</span>`
+          : "";
+        const updateBtn = g.installed
+          ? `<button class="maclua-btn-update" data-aid="${g.appid}">${t("updateGame")}</button>`
+          : "";
         item.innerHTML = `
           <div style="display: flex; align-items: center; min-width: 0;">
             <span class="maclua-game-item-name" title="${g.name}">${g.name}</span>
             <span class="maclua-game-item-id">(${g.appid})</span>
-            ${g.installed ? '<span style="margin-left: 8px; font-size: 10px; color: #22c55e; font-weight: 700;">[Installato]</span>' : ''}
+            ${installedBadge}
           </div>
-          <button class="maclua-btn-remove" data-aid="${g.appid}">Rimuovi</button>
+          <div style="display: flex; align-items: center;">
+            ${updateBtn}
+            <button class="maclua-btn-remove" data-aid="${g.appid}">${t("remove")}</button>
+          </div>
         `;
+        const uBtn = item.querySelector(".maclua-btn-update");
+        if (uBtn) {
+          uBtn.onclick = async (e) => {
+            e.preventDefault();
+            uBtn.disabled = true;
+            uBtn.innerText = t("updatingGame");
+            showToast("MacLua", t("updatingGame"));
+            const res = await api("/update", "POST", { appid: g.appid });
+            if (res && res.ok) {
+              showToast("MacLua", t("updatedToast", { name: g.name }));
+            }
+            setTimeout(() => { refreshLibrary(); }, 3000);
+          };
+        }
         item.querySelector(".maclua-btn-remove").onclick = async (e) => {
           e.preventDefault();
           const aid = g.appid;
           item.style.opacity = "0.5";
           const rem = await api("/remove", "POST", { appid: aid });
           if (rem && rem.ok) {
-            showToast("MacLua", `Rimosso ${g.name} da MacLua.`);
+            showToast("MacLua", t("removedGame", { name: g.name }));
             refreshLibrary();
           } else {
             item.style.opacity = "1";
-            showToast("MacLua", "Errore durante la rimozione.");
+            showToast("MacLua", t("removeError"));
           }
         };
         listEl.appendChild(item);
       }
     }
+
+    if (window.__MACLUA && Array.isArray(window.__MACLUA.initialGames) && window.__MACLUA.initialGames.length > 0) {
+      renderGames(window.__MACLUA.initialGames);
+    }
+
+    async function refreshLibrary() {
+      const libRes = await api("/library");
+      const games = (libRes && libRes.games) || [];
+      if (window.__MACLUA) {
+        window.__MACLUA.initialGames = games;
+      }
+      renderGames(games);
+    }
     refreshLibrary();
 
-    // Bottone Ripara Manifest
+    api("/settings").then((cfgRes) => {
+      const cfg = (cfgRes && (cfgRes.settings || cfgRes)) || {};
+      if (cfg.preferred_source && srcSel) srcSel.value = cfg.preferred_source;
+      if (cfg.hubcap_key && keyInp) keyInp.value = cfg.hubcap_key;
+    });
+
     overlay.querySelector("#maclua-act-cleanup").onclick = async (e) => {
       e.preventDefault();
       const btn = e.target;
       btn.disabled = true;
-      btn.innerText = "Pulizia in corso...";
+      btn.innerText = t("cleaning");
       const res = await api("/cleanup-manifests", "POST");
       btn.disabled = false;
-      btn.innerText = "🧹 Ripara Visualizzazione Steam";
+      btn.innerText = t("repairBtn");
       if (res && res.ok) {
-        const count = res.count !== undefined ? res.count : (res.cleaned || []).length;
-        showToast("MacLua", `✓ Rimossi ${count} manifest fantasma! Visualizzazione classica ripristinata.`);
+        showToast("MacLua", t("cleaned"));
         refreshLibrary();
       } else {
-        showToast("MacLua", "Pulizia completata.");
+        showToast("MacLua", t("cleaned"));
       }
     };
 
-    // Bottone Riavvia Steam
     overlay.querySelector("#maclua-act-restart").onclick = async (e) => {
       e.preventDefault();
       const btn = e.target;
       btn.disabled = true;
-      btn.innerText = "Riavvio...";
-      showToast("MacLua", "Riavvio di Steam in corso...");
+      btn.innerText = t("restarting");
+      showToast("MacLua", t("restarting"));
       close();
       await api("/restart-steam", "POST");
     };
 
-    // Bottone Salva Impostazioni
     overlay.querySelector("#maclua-btn-save").onclick = async (e) => {
       e.preventDefault();
       const saveBtn = e.target;
       saveBtn.disabled = true;
-      saveBtn.innerText = "Salvataggio...";
+      saveBtn.innerText = t("saving");
       const payload = {
         preferred_source: srcSel.value,
         hubcap_key: keyInp.value.trim(),
-        auto_update_apps: autoUpChk.checked,
-        donate_keys: donateChk.checked
+        auto_update_apps: true,
+        donate_keys: false
       };
       const res = await api("/settings", "POST", payload);
       saveBtn.disabled = false;
-      saveBtn.innerText = "Salva Impostazioni";
+      saveBtn.innerText = t("save");
       if (res && res.ok) {
-        showToast("MacLua", "✓ Impostazioni salvate con successo!");
+        showToast("MacLua", t("saved"));
         close();
       } else {
-        showToast("MacLua", "Errore durante il salvataggio.");
+        showToast("MacLua", t("saveError"));
       }
     };
   }
 
-  // 4. Iniezione del quadratino con logo accanto al carrello
-  function injectCartHeaderButton() {
-    // Cerca il blocco carrello o elementi limitrofi nello Store di Steam
-    const cartLink =
-      document.getElementById("cart_link") ||
+  // 4. Iniezione del quadratino con logo accanto al carrello (istantaneo, persistente, simmetrico)
+  function ensureCartHeaderButton() {
+    const cartAnchor =
       document.querySelector("a[href*='/cart']") ||
+      document.getElementById("cart_link") ||
       document.getElementById("cart_status_data") ||
       document.querySelector("div[class*='cart_status']") ||
       document.querySelector("div[class*='Cart']") ||
-      document.querySelector("div._1wn1lBlAzl3HMRqS1llwie");
-
-    const cartAnchor =
-      cartLink ||
+      document.querySelector("div._1wn1lBlAzl3HMRqS1llwie") ||
+      document.querySelector("div[class*='DesktopStoreHeader']") ||
+      document.querySelector("div[class*='StoreHeader']") ||
+      document.querySelector("div[class*='store_header']") ||
+      document.querySelector("a[href*='/wishlist']") ||
       document.getElementById("wishlist_link") ||
-      document.querySelector("a[href*='/wishlist']");
+      document.getElementById("global_action_menu");
 
     if (!cartAnchor) {
       return;
     }
 
-    let btn = document.getElementById("maclua-store-header-btn");
-
-    function alignBtn() {
-      if (!btn || !cartAnchor) return;
-      const cartStyle = window.getComputedStyle(cartAnchor);
-      const h = Math.round(cartAnchor.offsetHeight || parseFloat(cartStyle.height) || 32);
-      btn.style.height = `${h}px`;
-      btn.style.width = `${h}px`;
-      btn.style.minWidth = `${h}px`;
-      btn.style.minHeight = `${h}px`;
-      btn.style.maxHeight = `${h}px`;
-      btn.style.boxSizing = "border-box";
-      btn.style.display = "inline-flex";
-      btn.style.alignItems = "center";
-      btn.style.justifyContent = "center";
-      btn.style.alignSelf = cartStyle.alignSelf || "center";
-      btn.style.verticalAlign = cartStyle.verticalAlign || "middle";
-      btn.style.borderRadius = cartStyle.borderRadius || "3px";
-      btn.style.margin = "0 8px";
-      btn.style.padding = "0";
-
-      // Allineamento verticale perfetto: confronta i bounding client rect
-      const cartRect = cartAnchor.getBoundingClientRect();
-      const btnRect = btn.getBoundingClientRect();
-      if (cartRect.height > 0 && btnRect.height > 0) {
-        const diff = Math.round(cartRect.top - btnRect.top);
-        if (Math.abs(diff) >= 1) {
-          btn.style.transform = `translateY(${diff}px)`;
-        } else {
-          btn.style.transform = "";
-        }
-      }
-    }
-
-    if (btn) {
-      alignBtn();
+    const parent = cartAnchor.tagName === "DIV" ? cartAnchor : cartAnchor.parentElement;
+    if (!parent) {
       return;
     }
 
-    btn = document.createElement("button");
-    btn.id = "maclua-store-header-btn";
-    btn.className = "maclua-store-header-btn";
-    btn.title = "Impostazioni MacLua (Database, Chiavi, Auto-Update)";
-    btn.setAttribute("aria-label", "Impostazioni MacLua");
-    btn.innerHTML = `<img src="${MACLUA_ICON_B64}" alt="MacLua" class="maclua-header-icon" />`;
+    let btn = document.getElementById("maclua-store-header-btn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "maclua-store-header-btn";
+      btn.className = "maclua-store-header-btn";
+      btn.innerHTML = `<img src="${MACLUA_ICON_B64}" alt="MacLua" class="maclua-header-icon" />`;
+    }
 
+    btn.title = t("title");
+    btn.setAttribute("aria-label", t("title"));
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
       openSettingsModal();
     };
 
-    // Inserimento prima del link/blocco carrello come elemento gemello diretto
-    if (cartAnchor.parentElement) {
-      cartAnchor.insertAdjacentElement("beforebegin", btn);
+    // Assicura che il pulsante sia sempre connesso fisicamente nel DOM dentro il container del carrello
+    if (!btn.isConnected || !parent.contains(btn)) {
+      if (cartAnchor.tagName === "DIV") {
+        cartAnchor.appendChild(btn);
+      } else {
+        cartAnchor.insertAdjacentElement("beforebegin", btn);
+      }
     }
 
-    alignBtn();
-    requestAnimationFrame(alignBtn);
-    setTimeout(alignBtn, 150);
+    // Dimensionamento e allineamento simmetrico con il blocco del carrello (mai 0px anche prima di layout completo)
+    const cartStyle = window.getComputedStyle(cartAnchor);
+    const measuredHeight = cartAnchor.offsetHeight || parseFloat(cartStyle.height) || 0;
+    const h = (measuredHeight >= 20 && measuredHeight <= 50) ? Math.round(measuredHeight) : 32;
+    btn.style.height = `${h}px`;
+    btn.style.width = `${h}px`;
+    btn.style.minWidth = `${h}px`;
+    btn.style.minHeight = `${h}px`;
+    btn.style.boxSizing = "border-box";
+    btn.style.display = "inline-flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.alignSelf = "center";
+    btn.style.verticalAlign = "middle";
+    btn.style.borderRadius = (cartStyle.borderRadius && cartStyle.borderRadius !== "0px") ? cartStyle.borderRadius : "3px";
+    btn.style.margin = "0 6px";
+    btn.style.padding = "0";
+    btn.style.transform = "none";
+    btn.style.visibility = "visible";
+    btn.style.opacity = "1";
   }
+
+  window.ensureCartHeaderButton = ensureCartHeaderButton;
+  window.injectStoreUI = injectStoreUI;
+
+  function injectCartHeaderButton() {
+    ensureCartHeaderButton();
+  }
+
 
   // 5. Pulsante "Riavvia Steam" temporaneo nella pagina gioco
   function ensureRestartButton(headerTarget, anchorBtn) {
@@ -368,7 +621,7 @@
       restartBtn = document.createElement("button");
       restartBtn.id = "maclua-restart-btn";
       restartBtn.className = "maclua-header-btn restart";
-      restartBtn.innerText = "↻ Riavvia Steam";
+      restartBtn.innerText = t("restartHeaderBtn");
       if (anchorBtn && anchorBtn.parentNode) {
         anchorBtn.insertAdjacentElement("afterend", restartBtn);
       } else if (headerTarget) {
@@ -378,8 +631,8 @@
     restartBtn.onclick = async (e) => {
       e.preventDefault();
       restartBtn.disabled = true;
-      restartBtn.innerText = "Riavvio in corso...";
-      showToast("MacLua", "Riavvio di Steam in corso... Riapertura a breve.");
+      restartBtn.innerText = t("restarting");
+      showToast("MacLua", t("restarting"));
       window.__MacLuaPendingRestart = null;
       await api("/restart-steam", "POST");
     };
@@ -397,7 +650,7 @@
       removeBtn = document.createElement("button");
       removeBtn.id = "maclua-remove-btn";
       removeBtn.className = "maclua-header-btn remove";
-      removeBtn.innerText = "✕ Rimuovi da MacLua";
+      removeBtn.innerText = t("removeBtnHeader");
       if (anchorBtn && anchorBtn.parentNode) {
         anchorBtn.insertAdjacentElement("afterend", removeBtn);
       } else if (headerTarget) {
@@ -407,13 +660,13 @@
     removeBtn.onclick = async (e) => {
       e.preventDefault();
       removeBtn.disabled = true;
-      removeBtn.innerText = "Rimozione...";
+      removeBtn.innerText = t("removing");
       const res = await api("/remove", "POST", { appid });
       if (res && res.ok) {
-        showToast("MacLua", "Gioco rimosso con successo da MacLua.");
+        showToast("MacLua", t("removedGame", { name: String(appid) }));
         if (anchorBtn) {
           anchorBtn.className = "maclua-header-btn";
-          anchorBtn.innerText = "Aggiungi con MacLua";
+          anchorBtn.innerText = t("addBtn");
           anchorBtn.dataset.status = "unmanaged";
           anchorBtn.onclick = (ev) => {
             ev.preventDefault();
@@ -424,8 +677,8 @@
         removeRestartButton();
       } else {
         removeBtn.disabled = false;
-        removeBtn.innerText = "✕ Rimuovi da MacLua";
-        const err = res ? (res.error || "Errore durante la rimozione") : "Errore.";
+        removeBtn.innerText = t("removeBtnHeader");
+        const err = res ? (res.error || t("removeError")) : t("removeError");
         showToast("MacLua", err);
       }
     };
@@ -442,22 +695,22 @@
     const btn = document.getElementById("maclua-header-btn");
     if (btn) {
       btn.classList.add("loading");
-      btn.innerText = "Aggiunta in corso...";
+      btn.innerText = t("adding");
     }
 
     const res = await api("/add", "POST", { appid });
     if (res && res.ok) {
       const srcName = res.source ? ` (${res.source})` : "";
-      showToast("MacLua", `Gioco aggiunto con successo${srcName}! Riavvia Steam per vederlo nella Libreria con il tasto 'INSTALLA'.`);
+      showToast("MacLua", t("addedToast", { src: srcName }));
       window.__MacLuaPendingRestart = String(appid);
       if (btn) {
         btn.classList.remove("loading");
         btn.className = "maclua-header-btn added";
-        btn.innerText = "✓ Aggiunto con MacLua";
+        btn.innerText = t("addedBtn");
         btn.dataset.status = "managed";
         btn.onclick = (e) => {
           e.preventDefault();
-          showToast("MacLua", "Gioco già aggiunto! Riavvia Steam per vederlo nella Libreria con il tasto 'INSTALLA'.");
+          showToast("MacLua", t("alreadyAddedToast"));
         };
         const headerTarget = document.querySelector(".apphub_OtherSiteInfo");
         removeRemoveButton();
@@ -467,9 +720,9 @@
       if (btn) {
         btn.classList.remove("loading");
         btn.className = "maclua-header-btn";
-        btn.innerText = "Aggiungi con MacLua";
+        btn.innerText = t("addBtn");
       }
-      const err = res ? (res.error || "Errore durante l'aggiunta") : "Bridge offline.";
+      const err = res ? (res.error || t("removeError")) : "Bridge offline.";
       showToast("MacLua", err);
     }
   }
@@ -524,7 +777,7 @@
 
       if (isInstalled) {
         headerBtn.className = "maclua-header-btn installed";
-        headerBtn.innerText = "▶ Gioca con MacLua";
+        headerBtn.innerText = t("playBtn");
         headerBtn.dataset.status = "installed";
         headerBtn.onclick = (e) => {
           e.preventDefault();
@@ -534,11 +787,11 @@
         removeRemoveButton();
       } else if (isManaged) {
         headerBtn.className = "maclua-header-btn added";
-        headerBtn.innerText = "✓ Aggiunto con MacLua";
+        headerBtn.innerText = t("addedBtn");
         headerBtn.dataset.status = "managed";
         headerBtn.onclick = (e) => {
           e.preventDefault();
-          showToast("MacLua", "Gioco già aggiunto a MacLua. Puoi scaricarlo direttamente dalla Libreria di Steam!");
+          showToast("MacLua", t("alreadyAddedToast"));
         };
         if (window.__MacLuaPendingRestart === String(appid)) {
           ensureRestartButton(headerTarget, headerBtn);
@@ -549,7 +802,7 @@
         }
       } else {
         headerBtn.className = "maclua-header-btn";
-        headerBtn.innerText = "Aggiungi con MacLua";
+        headerBtn.innerText = t("addBtn");
         headerBtn.dataset.status = "unmanaged";
         headerBtn.onclick = (e) => {
           e.preventDefault();
@@ -572,69 +825,8 @@
     }, 200);
   }
 
-  // 7. Sincronizzazione Libreria Steam (steamloopback.host / SharedJSContext)
-  async function syncManagedLibrary(gamesList = null) {
-    try {
-      let games = gamesList;
-      if (!games) {
-        const res = await api("/library");
-        if (res && res.ok && Array.isArray(res.games)) {
-          games = res.games;
-        }
-      }
-      if (!Array.isArray(games)) return;
-
-      const managedAppIds = new Set(games.map((g) => Number(g.appid)).filter(Boolean));
-
-      // 1. Aggiorna appStore.m_mapApps
-      if (typeof appStore !== "undefined" && appStore.m_mapApps) {
-        for (const aid of managedAppIds) {
-          const appObj = appStore.m_mapApps.get(aid);
-          if (appObj) {
-            appObj.visible_in_game_list = true;
-          }
-        }
-      }
-
-      // 2. Aggiorna collectionStore.uncategorizedCollection
-      if (typeof collectionStore !== "undefined" && collectionStore.uncategorizedCollection) {
-        const unc = collectionStore.uncategorizedCollection;
-        if (unc && unc.m_rgApps && typeof unc.SetApps === "function") {
-          let updated = false;
-          const currentList = Array.from(unc.m_rgApps);
-          for (const aid of managedAppIds) {
-            if (!currentList.includes(aid)) {
-              currentList.push(aid);
-              updated = true;
-            }
-          }
-          if (updated) {
-            unc.SetApps(currentList);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("[MacLua] Errore sync libreria:", e);
-    }
-  }
-
-  window.__MacLuaSyncLibrary = syncManagedLibrary;
-
-  function initLibrarySync() {
-    if (!isLibrary) return;
-    syncManagedLibrary();
-    if (window.__MacLuaLibraryInterval) {
-      clearInterval(window.__MacLuaLibraryInterval);
-    }
-    window.__MacLuaLibraryInterval = setInterval(() => syncManagedLibrary(), 4000);
-  }
-
   function init() {
-    if (isLibrary) {
-      initLibrarySync();
-      return;
-    }
-
+    ensureCartHeaderButton();
     injectStoreUI();
 
     if (window.__MacLuaObserver) {
@@ -643,40 +835,71 @@
     if (window.__MacLuaInterval) {
       clearInterval(window.__MacLuaInterval);
     }
+    if (window.__MacLuaFastInterval) {
+      clearInterval(window.__MacLuaFastInterval);
+    }
+
+    // Ascolta cambi finestra, focus e tab per mostrare istantaneamente il blocchetto
+    window.addEventListener("focus", ensureCartHeaderButton);
+    window.addEventListener("blur", ensureCartHeaderButton);
+    document.addEventListener("visibilitychange", ensureCartHeaderButton);
+    window.addEventListener("pageshow", ensureCartHeaderButton);
+    window.addEventListener("popstate", () => {
+      ensureCartHeaderButton();
+      triggerInjectThrottled();
+    });
 
     const observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (m.target && m.target.id && m.target.id.startsWith("maclua-")) return;
       }
+      // Verifica e inietta istantaneamente il quadratino a latenza zero
+      ensureCartHeaderButton();
       triggerInjectThrottled();
     });
 
-    observer.observe(document.body || document.documentElement, {
+    observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
     });
     window.__MacLuaObserver = observer;
-
-    window.addEventListener("popstate", triggerInjectThrottled);
 
     const origPush = history.pushState;
     if (origPush && !window.__MacLuaPushStatePatched) {
       window.__MacLuaPushStatePatched = true;
       history.pushState = function () {
         origPush.apply(this, arguments);
+        ensureCartHeaderButton();
         triggerInjectThrottled();
       };
     }
 
-    window.__MacLuaInterval = setInterval(triggerInjectThrottled, 2000);
+    // Battito ad alta frequenza (40ms) per i primi 3 secondi mentre React idrata la pagina
+    let fastTicks = 0;
+    window.__MacLuaFastInterval = setInterval(() => {
+      ensureCartHeaderButton();
+      fastTicks++;
+      if (fastTicks > 75) {
+        clearInterval(window.__MacLuaFastInterval);
+      }
+    }, 40);
+
+    // Controllo periodico regolare
+    window.__MacLuaInterval = setInterval(() => {
+      ensureCartHeaderButton();
+      triggerInjectThrottled();
+    }, 400);
   }
 
+  // Esegui init immediatamente (funziona anche a inizio parsing grazie a document.documentElement)
+  init();
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
+    document.addEventListener("DOMContentLoaded", () => {
+      ensureCartHeaderButton();
+      injectStoreUI();
+    });
   }
 
-  window.__MacLuaVersion = 4;
+  window.__MacLuaVersion = 9;
   window.__MacLuaReady = true;
 })();

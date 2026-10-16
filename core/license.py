@@ -169,8 +169,21 @@ def _build_kv(pkgid, appids, depots):
     w += str(pkgid).encode() + b"\x00"
     for k in kids:
         ser_node(k, w)
-    w.append(0x08)
+    w.append(0x08)  # Chiude la sezione del package
+    w.append(0x08)  # Chiude la root map del KeyValues binario
     return bytes(w)
+
+
+def has_forged_package(path):
+    """Verifica se il package forgiato FORGE_ID è presente nel file."""
+    try:
+        marker = struct.pack("<I", FORGE_ID)
+        with open(path, "rb") as f:
+            data = f.read()
+        return marker in data
+    except Exception:
+        return False
+
 
 
 def _remove_forged(out):

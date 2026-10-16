@@ -2,13 +2,15 @@
 
 Reference: [LuaTools v1.3.2](https://github.com/madoiscool/LuaTools) (MIT License, © 2026 LuaTools).
 
+> Nota (15 ott 2026): l'app standalone Swift (`native/`, `MacLua.app`) è stata rimossa dal progetto. Dove la tabella la cita come deliverable, il riferimento attuale è l'UI in-Steam (`core/steamui/`) con il bridge Python; le colonne "MacLua Existing" fotografano lo stato al momento dell'analisi.
+
 | Feature / Area | LuaTools (C# / Windows) | MacLua Existing (Swift / Python) | Verdict | MacLua Target Implementation |
 |---|---|---|---|---|
 | **In-Steam CEF Injection** | `.cef-enable-remote-debugging` junction + CDP port 8080 WebSocket `Runtime.evaluate` of `luatools.js` | None (standalone app only) | **ADOPT** | `core/cdp.py`, `core/steamhook.py`, `core/steamui/maclua.js`, `maclua.css`. Reversible via `maclua steam-hook enable/disable`. |
 | **Local Bridge Server** | `HttpServerService` on `http://127.0.0.1:6767/`, unauthenticated | Bridge via direct CLI subprocess invocation (`MacLuaBridge.swift`) | **ADOPT & HARDEN** | `core/bridge.py` on `127.0.0.1:6767` with random token auth (`~/Library/Application Support/MacLua/bridge_token`), CORS origin restriction, SSE `/events`. |
 | **DLC Handling** | Can display and handle individual DLCs | Strictly integrates DLCs into base game; DLCs are never separate cards | **KEEP MACLUA (SUPERIOR)** | Base game always bundles all current & future DLCs automatically. |
 | **Game Launching on macOS** | Windows-centric (`.exe` launching, Steamless, AutoCrack) | Universal Mach-O wrapper binary + `steam://run/<id>` | **KEEP MACLUA (SUPERIOR)** | Preserves Mach-O directory fixer in `core/install.py` for flawless Steam client tracking & overlay. |
-| **Collections** | Browser link to `lua.tools/collections` | None | **ADOPT** | `core/collections.py` (live Next.js scraper + offline cache) + `CollectionsView.swift` in standalone app + in-Steam shortcut. |
+| **Collections** | Browser link to `lua.tools/collections` | None | **ADOPT** | `core/collections.py` (live Next.js scraper + offline cache) + in-Steam collection shortcut |
 | **Download Queue** | `DownloadQueue.cs` with concurrent jobs, progress, speed, ETA, history | Single active download in `Downloader.swift` | **ADOPT** | `core/queue.py` multi-job download queue with speed calculation, ETA, retry, and history. |
 | **DNS-over-HTTPS (DoH)** | `DohResolver.cs` using Cloudflare (1.1.1.1) | System default DNS resolver | **ADOPT** | `core/netresil.py` supporting DoH (Cloudflare 1.1.1.1 & Google 8.8.8.8) with Auto/Always/Never modes. |
 | **Lua Vault (Backups)** | `LuaVault.cs` with versioned archives of `.lua` files | Plain file overwrite in `stplug-in/` | **ADOPT** | `core/vault.py` automatic snapshots, version comparison, and instant rollback. |

@@ -146,6 +146,35 @@ class CDPClient:
                 pass
         return None
 
+    def add_script_on_new_document(self, script):
+        """Registra lo script in CEF tramite Page.addScriptToEvaluateOnNewDocument.
+        Viene eseguito istantaneamente e automaticamente prima di qualsiasi altro script
+        ad ogni navigazione, cambio pagina o caricamento del tab.
+        """
+        try:
+            call_id = self._msg_id
+            self._msg_id += 1
+            self.send_frame(json.dumps({"id": call_id, "method": "Page.enable", "params": {}}))
+            for _ in range(10):
+                raw = self.read_frame()
+                if json.loads(raw).get("id") == call_id:
+                    break
+
+            call_id = self._msg_id
+            self._msg_id += 1
+            self.send_frame(json.dumps({
+                "id": call_id,
+                "method": "Page.addScriptToEvaluateOnNewDocument",
+                "params": {"source": script}
+            }))
+            for _ in range(10):
+                raw = self.read_frame()
+                if json.loads(raw).get("id") == call_id:
+                    break
+            return True
+        except Exception:
+            return False
+
     def close(self):
         if self.sock:
             try:

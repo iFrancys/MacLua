@@ -57,7 +57,7 @@ pub async fn attach_tab(ws_url: &str, injected_script: &str) -> Result<(), CdpEr
     });
     ws_stream.send(Message::Text(add_binding_cmd.to_string())).await?;
 
-    // 3. Inject MacLua JS
+    // 3. Inject MacLua JS into current document
     let eval_cmd = serde_json::json!({
         "id": 3,
         "method": "Runtime.evaluate",
@@ -67,6 +67,22 @@ pub async fn attach_tab(ws_url: &str, injected_script: &str) -> Result<(), CdpEr
         }
     });
     ws_stream.send(Message::Text(eval_cmd.to_string())).await?;
+
+    // 4. Register Page.addScriptToEvaluateOnNewDocument so CEF automatically executes MacLua JS on every new document/navigation
+    let page_enable = serde_json::json!({
+        "id": 4,
+        "method": "Page.enable"
+    });
+    let _ = ws_stream.send(Message::Text(page_enable.to_string())).await;
+
+    let new_doc_cmd = serde_json::json!({
+        "id": 5,
+        "method": "Page.addScriptToEvaluateOnNewDocument",
+        "params": {
+            "source": injected_script
+        }
+    });
+    let _ = ws_stream.send(Message::Text(new_doc_cmd.to_string())).await;
 
     // Listen for incoming events asynchronously in background task
     tokio::spawn(async move {

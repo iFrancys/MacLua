@@ -18,8 +18,8 @@ def test_install_opens_url(monkeypatch):
 
 
 def test_ensure_on_empty_tree(tmp_path, monkeypatch):
-    import sys
-    sys.path.insert(0, "/Users/ciccioomazz/Desktop/MacLua/tests")
+    import os, sys
+    sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
     from test_license import _pkg0, _file
     home = tmp_path / "home"
     appcache = home / "Library/Application Support/Steam/appcache"

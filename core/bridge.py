@@ -1,5 +1,5 @@
 """Server bridge HTTP locale su 127.0.0.1:6767 con autenticazione via token.
-Espone le API REST e stream SSE per l'interfaccia in-Steam (JS) e l'app nativa MacLua (Swift).
+Espone le API REST e stream SSE per l'interfaccia in-Steam (JS).
 Tutti gli endpoint rispettano rigorosamente la regola: i DLC sono SEMPRE integrati nei giochi base e mai mostrati separatamente.
 """
 import os
@@ -54,6 +54,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_GET(self):
         if not self._verify_auth():
@@ -325,8 +328,30 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
         elif path == "/cleanup-manifests":
             home = os.path.expanduser("~")
-            cleaned = install.cleanup_broken_appmanifests(paths.steamapps(home))
-            return self._send_json(200, {"ok": True, "cleaned": cleaned, "count": len(cleaned)})
+            steamapps_dir = paths.steamapps(home)
+            cleaned = install.cleanup_broken_appmanifests(steamapps_dir)
+            reconciled = install.reconcile_installed_appmanifests(steamapps_dir, home=home)
+            try:
+                steamhook.sync_library_in_steam(home)
+            except Exception:
+                pass
+            return self._send_json(200, {"ok": True, "cleaned": cleaned, "reconciled": reconciled, "count": len(cleaned) + len(reconciled)})
+
+        elif path == "/update":
+            appid = data.get("appid")
+            if not appid:
+                return self._send_json(400, {"error": "Serve appid"})
+            home = os.path.expanduser("~")
+
+            def _bg_update():
+                try:
+                    updates.apply_update(appid, home=home)
+                    steamhook.sync_library_in_steam(home)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_bg_update, daemon=True).start()
+            return self._send_json(200, {"ok": True, "appid": int(appid), "updating": True})
 
         elif path == "/remove":
             appid = data.get("appid")
@@ -358,6 +383,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
             from core import steamhook
             try:
+                steamhook.remove_from_steam_library(target_id, home)
                 steamhook.broadcast_library_refresh(home)
             except Exception:
                 pass
@@ -478,9 +504,55 @@ def get_game_depots(appid, home=None):
     }
 
 
+def check_stale_client_licenses(home=None):
+    """Rileva licenze "stale" nel client Steam in esecuzione.
+
+    Il client adotta packageinfo.vdf solo a freddo: se il file su disco è corretto
+    ma un gioco gestito e installato non risulta licenziato nel client in esecuzione,
+    il rimedio è riavviare Steam. Invia una notifica macOS e ritorna True."""
+    home = home or os.path.expanduser("~")
+    games = steamhook.get_managed_games(home)
+    sample = next((g for g in games if g.get("installed")), None)
+    if not sample:
+        return False
+    if steamhook.client_app_licensed(sample["appid"]) is not False:
+        return False
+
+    pkginfo = os.path.join(paths.appcache(home), "packageinfo.vdf")
+    if not os.path.exists(pkginfo):
+        return False
+
+    import maclua
+    appids, depots = maclua._managed_sets(home)
+    m_app, m_dep = license.check(pkginfo, appids, depots)
+    if m_app or m_dep:
+        # Il file stesso è incompleto: se ne occupa la sentinella, non l'utente.
+        return False
+
+    steamhook.notify_macos(
+        "MacLua",
+        "Steam sta usando licenze non aggiornate: riavvialo per far partire i giochi "
+        "(pulsante Riavvia Steam nel riquadro MacLua)."
+    )
+    return True
+
+
 def start_continuous_injector_daemon():
-    """Avvia il thread demone per monitorare e gestire Steam continuamente (RPC rapido a 200ms e iniezione a 1s)."""
-    def _loop():
+    """Avvia i thread demone dedicati:
+    1. MacLuaTabRpcDaemon: loop ultra-rapido (150ms) per RPC e iniezione tab Store.
+    2. MacLuaSentinelDaemon: loop (500ms) per sentinella packageinfo.vdf e sync periodico libreria.
+    """
+    def _tab_rpc_loop():
+        while True:
+            try:
+                if steamhook.is_cdp_available(0.1):
+                    steamhook.drain_all_tabs_rpc()
+                    steamhook.inject_into_tabs()
+            except Exception:
+                pass
+            time.sleep(0.15)
+
+    def _sentinel_loop():
         home = os.path.expanduser("~")
         try:
             import maclua
@@ -489,31 +561,53 @@ def start_continuous_injector_daemon():
             pass
 
         tick = 0
+        last_pkginfo_mtime = 0.0
+        last_stale_notify = 0.0
+        last_library_sync = 0.0
+        pkginfo = os.path.join(paths.appcache(home), "packageinfo.vdf")
+
         while True:
             try:
-                steamhook.drain_all_tabs_rpc()
-                if tick % 5 == 0:
-                    steamhook.inject_into_tabs()
-                # Verifica salute packageinfo.vdf ogni ~10s (50 tick)
-                if tick % 50 == 0:
+                now = time.monotonic()
+                # 1. Sentinella licenze: monitora mtime di packageinfo.vdf
+                if os.path.exists(pkginfo):
                     try:
-                        import maclua
-                        from core import license
-                        pkginfo = os.path.join(paths.appcache(home), "packageinfo.vdf")
-                        if os.path.exists(pkginfo):
+                        cur_mtime = os.path.getmtime(pkginfo)
+                        if cur_mtime != last_pkginfo_mtime or tick % 20 == 0:
+                            last_pkginfo_mtime = cur_mtime
+                            import maclua
+                            from core import license
                             appids, depots = maclua._managed_sets(home)
                             m_app, m_dep = license.check(pkginfo, appids, depots)
-                            if m_app or m_dep:
+                            has_forge = license.has_forged_package(pkginfo) if appids else True
+                            if m_app or m_dep or not has_forge:
                                 maclua._ensure(home)
+                                last_pkginfo_mtime = os.path.getmtime(pkginfo)
+                    except Exception:
+                        pass
+
+                # 2. Sincronizzazione libreria in SharedJSContext (solo se CDP è pronto)
+                if (tick < 5 or (now - last_library_sync) >= 15.0) and steamhook.is_cdp_available(0.1):
+                    res = steamhook.sync_library_in_steam(home)
+                    if res and res.get("ok"):
+                        last_library_sync = now
+
+                # 3. Controllo licenze stale con debounce di 30 minuti
+                if tick % 60 == 0 and (now - last_stale_notify) >= 1800:
+                    try:
+                        if check_stale_client_licenses(home):
+                            last_stale_notify = now
                     except Exception:
                         pass
             except Exception:
                 pass
             tick += 1
-            time.sleep(0.2)
+            time.sleep(0.5)
 
-    t = threading.Thread(target=_loop, daemon=True, name="MacLuaInjectorDaemon")
-    t.start()
+    t1 = threading.Thread(target=_tab_rpc_loop, daemon=True, name="MacLuaTabRpcDaemon")
+    t1.start()
+    t2 = threading.Thread(target=_sentinel_loop, daemon=True, name="MacLuaSentinelDaemon")
+    t2.start()
 
 
 def run_bridge_server(port=PORT):

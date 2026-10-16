@@ -151,10 +151,8 @@ def parse_metadata(payload):
     return meta
 
 
-def parse_manifest(path):
-    """{'depot','gid','creation_time','filenames_encrypted','files','size'}."""
-    with open(path, "rb") as f:
-        data = f.read()
+def parse_manifest_bytes(data: bytes):
+    """{'depot','gid','creation_time','filenames_encrypted','files','size'} da bytes."""
     payload = None
     meta = {}
     for magic, body in split_sections(data):
@@ -176,6 +174,13 @@ def parse_manifest(path):
     return {"depot": meta["depot"], "gid": meta["gid"],
             "creation_time": meta.get("creation_time"),
             "filenames_encrypted": False, "files": files, "size": len(data)}
+
+
+def parse_manifest(path):
+    """{'depot','gid','creation_time','filenames_encrypted','files','size'}."""
+    with open(path, "rb") as f:
+        data = f.read()
+    return parse_manifest_bytes(data)
 
 
 def adler0(data):

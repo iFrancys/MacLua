@@ -65,21 +65,34 @@ def select_depots(appid, keyed, appinfo_depots):
     return wanted, skipped
 
 
-def resolve_manifest(store_dir, depotcache_dir, depot):
-    """Manifest staged da usare: pin .preferred_<depot>, senò il più nuovo."""
+def resolve_manifest(store_dir, depotcache_dir, depot, preferred_gid=None):
+    """Manifest staged da usare: preferred_gid, pin .preferred_<depot>, senò il più nuovo (per creation_time/mtime)."""
+    if preferred_gid is not None and str(preferred_gid).strip().isdigit():
+        gid = str(preferred_gid).strip()
+        for d in (store_dir, depotcache_dir):
+            if not d:
+                continue
+            cand = os.path.join(d, "%d_%s.manifest" % (depot, gid))
+            if os.path.exists(cand):
+                return cand
+
     pref = os.path.join(store_dir, ".preferred_%d" % depot)
     try:
         with open(pref, encoding="utf-8", errors="replace") as f:
             gid = f.read().strip()
         if gid.isdigit():
             for d in (store_dir, depotcache_dir):
+                if not d:
+                    continue
                 cand = os.path.join(d, "%d_%s.manifest" % (depot, gid))
                 if os.path.exists(cand):
                     return cand
     except OSError:
         pass
-    best, best_mtime = None, -1.0
+    best, best_rank = None, (-1, -1.0)
     for d in (store_dir, depotcache_dir):
+        if not d:
+            continue
         try:
             names = os.listdir(d)
         except OSError:
@@ -94,8 +107,14 @@ def resolve_manifest(store_dir, depotcache_dir, depot):
                 mt = os.path.getmtime(p)
             except OSError:
                 continue
-            if mt > best_mtime:
-                best, best_mtime = p, mt
+            ct = 0
+            try:
+                ct = int(manifest.parse_manifest(p).get("creation_time") or 0)
+            except Exception:
+                ct = 0
+            rank = (ct, mt)
+            if rank > best_rank:
+                best, best_rank = p, rank
     if best is None:
         raise ValueError("nessun manifest staged per depot %d" % depot)
     return best
@@ -123,14 +142,55 @@ def installed_gids(acf_text):
     return {int(d): g for d, g in pairs}
 
 
-def update_check(acf_text, appinfo_depots):
-    """Confronta manifest installati (acf) con gid pubblici (appinfo).
+def _installed_state_path(store_dir, appid):
+    return os.path.join(store_dir, f".installed_{int(appid)}.json")
+
+
+def read_installed_state(store_dir, appid):
+    """Legge lo stato reale installato su disco (.installed_<appid>.json) se presente."""
+    import json
+    p = _installed_state_path(store_dir, appid)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def write_installed_state(store_dir, appid, buildid, depot_gids):
+    """Salva lo stato reale dei file installati su disco (.installed_<appid>.json)."""
+    import json
+    os.makedirs(store_dir, exist_ok=True)
+    p = _installed_state_path(store_dir, appid)
+    payload = {
+        "appid": int(appid),
+        "buildid": int(buildid) if buildid else 0,
+        "depots": {str(k): str(v) for k, v in (depot_gids or {}).items()},
+        "updated_at": int(time.time()),
+    }
+    tmp = p + ".tmp.maclua"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    os.rename(tmp, p)
+    return p
+
+
+def update_check(acf_text, appinfo_depots, store_dir=None, appid=None):
+    """Confronta manifest installati (stato reale o acf) con gid pubblici (appinfo).
 
     Ritorna {'installed': {depot: gid}, 'live': {depot: gid},
     'available': bool}. 'available' solo se un depot installato ha un gid
     pubblico diverso e noto.
     """
     installed = installed_gids(acf_text)
+    if store_dir and appid:
+        st = read_installed_state(store_dir, appid)
+        if st and isinstance(st.get("depots"), dict):
+            for k, v in st["depots"].items():
+                if str(k).isdigit():
+                    installed[int(k)] = str(v)
     live = {d["id"]: d["gid"] for d in (appinfo_depots or [])
             if d.get("gid")}
     available = any(gid != live.get(depot)
@@ -154,7 +214,10 @@ def last_owner(loginusers_path):
 
 
 def is_game_installed(appid, home=None):
-    """Verifica se il gioco è effettivamente installato (scaricato con file su disco)."""
+    """Verifica se il gioco è effettivamente installato (scaricato con file su disco).
+    Considera installati anche i giochi con StateFlags 6 (Update Required | Fully Installed)
+    o SizeOnDisk > 0 purché la cartella in common/ esista e non sia vuota.
+    """
     from core import paths
     home = home or os.path.expanduser("~")
     acf = os.path.join(paths.steamapps(home), f"appmanifest_{int(appid)}.acf")
@@ -164,15 +227,141 @@ def is_game_installed(appid, home=None):
         with open(acf, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
         m_flags = re.search(r'"StateFlags"\s+"(\d+)"', content)
-        if m_flags and int(m_flags.group(1)) == 4:
+        m_size = re.search(r'"SizeOnDisk"\s+"(\d+)"', content)
+        flags = int(m_flags.group(1)) if m_flags else 0
+        size = int(m_size.group(1)) if m_size else 0
+        if (flags & 4) != 0 or size > 0:
             m_dir = re.search(r'"installdir"\s+"([^"]+)"', content)
             if m_dir:
                 g_dir = os.path.join(paths.steamapps(home), "common", m_dir.group(1))
                 return os.path.isdir(g_dir) and len(os.listdir(g_dir)) > 0
-            return True
+            return (flags & 4) != 0
         return False
     except Exception:
         return False
+
+
+def reconcile_installed_appmanifests(steamapps_dir, home=None):
+    """Riconcilia gli appmanifest dei giochi gestiti già installati su disco:
+    1. Rimuove pin obsoleti (.preferred_<depot> e setManifestid nei .lua) se auto_update_apps è attivo.
+    2. Se Steam ha marcato un gioco installato con StateFlags != 4 (es. StateFlags 6 'Update Required',
+       UpdateResult 6 'Access Denied') perché è uscito un aggiornamento su PICS di cui Steam non può
+       scaricare il manifest senza token, salva la versione reale in .installed_<appid>.json e allinea
+       appmanifest_<appid>.acf a StateFlags 4 + public_buildid + live GID, così il gioco resta sempre
+       avviabile e aggiornabile in-place tramite MacLua senza mai perdere i dati o bloccarsi.
+    """
+    from core import appinfo as _ai, paths as _paths, settings as _settings, source as _source
+    home = home or os.path.expanduser("~")
+    if not os.path.isdir(steamapps_dir):
+        return []
+
+    stplug_dir = _paths.stplug_in(home)
+    store_dir = _paths.sls_manifests(home)
+    depotcache_dir = _paths.depotcache(home)
+
+    # 1. Se auto_update è attivo, rimuovi i vecchi file .preferred_* e commenta setManifestid nei .lua
+    if _settings.get("auto_update_apps", True):
+        if os.path.isdir(store_dir):
+            for fn in os.listdir(store_dir):
+                if fn.startswith(".preferred_"):
+                    try:
+                        os.remove(os.path.join(store_dir, fn))
+                    except OSError:
+                        pass
+        if os.path.isdir(stplug_dir):
+            for fn in os.listdir(stplug_dir):
+                if fn.endswith(".lua"):
+                    lp = os.path.join(stplug_dir, fn)
+                    try:
+                        with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                            orig = f.read()
+                        cleaned_lua = _source.comment_out_manifest_pins(orig)
+                        if cleaned_lua != orig:
+                            with open(lp, "w", encoding="utf-8") as f:
+                                f.write(cleaned_lua)
+                    except OSError:
+                        pass
+
+    reconciled = []
+    for fn in sorted(os.listdir(steamapps_dir)):
+        if not (fn.startswith("appmanifest_") and fn.endswith(".acf")):
+            continue
+        m_id = re.match(r"appmanifest_(\d+)\.acf$", fn)
+        if not m_id:
+            continue
+        appid = int(m_id.group(1))
+        lua_path = os.path.join(stplug_dir, f"{appid}.lua")
+        if not os.path.exists(lua_path):
+            continue
+        if not is_game_installed(appid, home):
+            continue
+
+        acf_path = os.path.join(steamapps_dir, fn)
+        try:
+            with open(acf_path, "r", encoding="utf-8", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+
+        m_flags = re.search(r'"StateFlags"\s+"(\d+)"', txt)
+        m_build = re.search(r'"buildid"\s+"(\d+)"', txt)
+        m_size = re.search(r'"SizeOnDisk"\s+"(\d+)"', txt)
+        flags = int(m_flags.group(1)) if m_flags else 0
+        cur_build = int(m_build.group(1)) if m_build else 0
+        size_on_disk = int(m_size.group(1)) if m_size else 0
+
+        cur_gids = installed_gids(txt)
+        try:
+            pub_build = _ai.public_buildid(appid)
+            app_depots = _ai.depots(appid)
+        except Exception:
+            pub_build = None
+            app_depots = []
+
+        live_gids = {int(d["id"]): str(d["gid"]) for d in (app_depots or []) if d.get("gid")}
+        needs_patch = (flags != 4)
+        if pub_build and cur_build and pub_build != cur_build:
+            needs_patch = True
+        for dep, gid in cur_gids.items():
+            if dep in live_gids and live_gids[dep] != str(gid):
+                needs_patch = True
+
+        if not needs_patch:
+            continue
+
+        # Salva la versione effettivamente presente su disco in .installed_<appid>.json
+        # se i manifest correnti dell'acf esistono localmente (cioè non erano già stati riconciliati).
+        existing_state = read_installed_state(store_dir, appid)
+        acf_manifests_local = all(
+            os.path.exists(os.path.join(store_dir, f"{dep}_{gid}.manifest"))
+            or os.path.exists(os.path.join(depotcache_dir, f"{dep}_{gid}.manifest"))
+            for dep, gid in cur_gids.items()
+        ) if cur_gids else False
+
+        if acf_manifests_local or existing_state is None:
+            write_installed_state(store_dir, appid, cur_build, cur_gids)
+
+        # Costruisci depot_info aggiornato preservando le size dei singoli depot
+        depot_sizes = {}
+        for m_dep in re.finditer(
+            r'"(\d+)"\s*\{\s*"manifest"\s+"(\d+)"(?:\s*"size"\s+"(\d+)")?', txt
+        ):
+            depot_sizes[int(m_dep.group(1))] = int(m_dep.group(3) or 0)
+
+        new_depot_info = {}
+        for dep, old_gid in cur_gids.items():
+            target_gid = live_gids.get(dep, old_gid)
+            new_depot_info[dep] = (target_gid, depot_sizes.get(dep, size_on_disk))
+
+        patch_appmanifest(
+            acf_path,
+            new_depot_info,
+            size_on_disk,
+            buildid=pub_build or cur_build,
+        )
+        reconciled.append(appid)
+
+    return reconciled
 
 
 def cleanup_broken_appmanifests(steamapps_dir):
@@ -349,6 +538,27 @@ def _create_macho_launcher(dest_path, target_real_name):
     return False
 
 
+def unwrap_executables(root):
+    """Ripristina temporaneamente <bin>.real -> <bin> nei bundle .app prima di un update in-place,
+    così download_file può riutilizzare tutti i chunk invariati dell'eseguibile reale."""
+    unwrapped = 0
+    if not os.path.isdir(root):
+        return unwrapped
+    for dirpath, _, filenames in os.walk(root):
+        if dirpath.endswith(".app/Contents/MacOS"):
+            for fn in filenames:
+                if fn.endswith(".real"):
+                    real_p = os.path.join(dirpath, fn)
+                    orig_p = os.path.join(dirpath, fn[:-5])
+                    if os.path.isfile(real_p):
+                        try:
+                            os.replace(real_p, orig_p)
+                            unwrapped += 1
+                        except OSError:
+                            pass
+    return unwrapped
+
+
 def fix_executables(root):
     """+x su Mach-O e script (il manifest non porta il bit exec)."""
     fixed = 0
@@ -385,8 +595,17 @@ def fix_executables(root):
                             if head in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
                                         b"\xca\xfe\xba\xbe", b"\xce\xfa\xed\xfe",
                                         b"\xcf\xfa\xed\xfe"):
-                                if not os.path.exists(real_p):
-                                    os.rename(p, real_p)
+                                is_already_launcher = False
+                                if os.path.exists(real_p):
+                                    try:
+                                        with open(p, "rb") as lf:
+                                            blob = lf.read(131072)
+                                        if (fn + ".real").encode("utf-8") in blob or b"../Resources" in blob:
+                                            is_already_launcher = True
+                                    except OSError:
+                                        pass
+                                if not is_already_launcher:
+                                    os.replace(p, real_p)
                                     _create_macho_launcher(p, fn + ".real")
                                     os.chmod(real_p, 0o755)
                                     fixed += 1
@@ -450,10 +669,12 @@ def fetch_app(appid, stplug_dir, cache_dir, store_dir, steamapps_dir,
     out = os.path.join(steamapps_dir, "common", _installdir_of(acf_text))
     os.makedirs(out, exist_ok=True)
 
+    live_by_depot = {int(d["id"]): str(d["gid"]) for d in (appinfo_depots or []) if d.get("gid")}
     depot_info, grand, nfiles = {}, 0, 0
     parsed = []
     for depot in wanted:
-        man_path = resolve_manifest(store_dir, depotcache_dir, depot)
+        man_path = resolve_manifest(store_dir, depotcache_dir, depot,
+                                    preferred_gid=live_by_depot.get(depot))
         info = manifest.parse_manifest(man_path)
         key = depotkeys.load_key(cache_dir, depot)
         total = sum(f["size"] for f in info["files"])
@@ -469,6 +690,10 @@ def fetch_app(appid, stplug_dir, cache_dir, store_dir, steamapps_dir,
     if dry_run:
         return {"app": appid, "depots": wanted, "out": out, "bytes": grand,
                 "files": sum(len(i["files"]) for _, i, _ in parsed)}
+
+    # Ripristina eventuali .real -> eseguibile prima del download delta in-place
+    unwrap_executables(out)
+
     import concurrent.futures
     for depot, info, key in parsed:
         entries = info["files"]
@@ -488,7 +713,25 @@ def fetch_app(appid, stplug_dir, cache_dir, store_dir, steamapps_dir,
     nfix = fix_executables(out)
     acf_path, _ = _read_acf(steamapps_dir, appid)
     b_id = _ai.public_buildid(appid)
-    patch_appmanifest(acf_path, depot_info, grand, buildid=b_id)
+
+    # Salva i GID effettivamente scaricati su disco in .installed_<appid>.json
+    installed_depot_gids = {dep: gid for dep, (gid, _) in depot_info.items()}
+    all_live = all(
+        live_by_depot.get(dep) == str(gid)
+        for dep, gid in installed_depot_gids.items()
+        if dep in live_by_depot
+    )
+    real_build = b_id if all_live else 0
+    try:
+        write_installed_state(store_dir, appid, real_build, installed_depot_gids)
+    except OSError:
+        pass
+
+    # Nell'appmanifest per Steam, usa sempre i live GID se disponibili così Steam non blocca il gioco con StateFlags 6
+    acf_depot_info = {}
+    for dep, (gid, dep_size) in depot_info.items():
+        acf_depot_info[dep] = (live_by_depot.get(dep, gid), dep_size)
+    patch_appmanifest(acf_path, acf_depot_info, grand, buildid=b_id)
     return {"app": appid, "depots": wanted, "out": out, "bytes": grand,
             "files": nfiles, "exec_fixed": nfix,
             "manifest": os.path.join(steamapps_dir,
@@ -496,24 +739,32 @@ def fetch_app(appid, stplug_dir, cache_dir, store_dir, steamapps_dir,
 
 
 def verify_app(appid, steamapps_dir, store_dir, depotcache_dir=None):
-    """File su disco vs manifest dell'acf. Ritorna [relpath anomali]."""
+    """File su disco vs manifest dell'acf (o .installed_<appid>.json). Ritorna [relpath anomali]."""
     _, acf_text = _read_acf(steamapps_dir, appid)
     out = os.path.join(steamapps_dir, "common", _installdir_of(acf_text))
     depotcache_dir = depotcache_dir or os.path.join(
         os.path.dirname(os.path.abspath(steamapps_dir)), "depotcache")
     bad = []
+    state = read_installed_state(store_dir, appid)
+    state_depots = (state.get("depots") or {}) if isinstance(state, dict) else {}
     for depot, gid in sorted(installed_gids(acf_text).items()):
         cand = os.path.join(store_dir, "%d_%s.manifest" % (depot, gid))
         if not os.path.exists(cand):
             cand = os.path.join(depotcache_dir, "%d_%s.manifest" % (depot, gid))
+        if not os.path.exists(cand) and str(depot) in state_depots:
+            real_gid = state_depots[str(depot)]
+            cand = os.path.join(store_dir, "%d_%s.manifest" % (depot, real_gid))
+            if not os.path.exists(cand):
+                cand = os.path.join(depotcache_dir, "%d_%s.manifest" % (depot, real_gid))
         info = manifest.parse_manifest(cand)
         for entry in info["files"]:
             rel = entry["name"].replace("\\", "/")
             if entry.get("flags", 0) & fetch.FLAG_DIRECTORY:
                 continue
             p = os.path.join(out, *rel.split("/"))
+            check_p = (p + ".real") if os.path.exists(p + ".real") else p
             try:
-                with open(p, "rb") as f:
+                with open(check_p, "rb") as f:
                     data = f.read()
             except OSError:
                 bad.append(rel)

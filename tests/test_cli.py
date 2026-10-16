@@ -1,8 +1,8 @@
-"""CLI MacLua via subprocess (solo comandi senza effetti collaterali)."""
+import os
 import subprocess
 import sys
 
-MACLUA = "/Users/ciccioomazz/Desktop/MacLua/maclua.py"
+MACLUA = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "maclua.py"))
 
 
 def _run(*args):

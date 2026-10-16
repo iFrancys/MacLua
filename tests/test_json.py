@@ -1,9 +1,9 @@
-"""Contratto JSON macchina-leggibile: `maclua --json <cmd>`."""
 import json
+import os
 import subprocess
 import sys
 
-MACLUA = "/Users/ciccioomazz/Desktop/MacLua/maclua.py"
+MACLUA = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "maclua.py"))
 
 
 def _run(*args):

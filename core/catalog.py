@@ -47,8 +47,17 @@ def platforms(appid, base=STORE):
     return {k for k in ("windows", "mac", "linux") if plats.get(k) is True}
 
 
-def app_details(appid, base=STORE):
+def app_details(appid, base=STORE, use_cache=True):
     """Informazioni base dell'app dallo store: type, parent_appid, dlc, name."""
+    if use_cache and base == STORE:
+        try:
+            from core import appcache
+            cached = appcache.get_info(appid)
+            if cached and isinstance(cached, dict) and cached.get("name"):
+                return cached
+        except Exception:
+            pass
+
     url = "%s/api/appdetails?appids=%d&filters=basic" % (
         base.rstrip("/"), int(appid))
     try:
@@ -62,7 +71,7 @@ def app_details(appid, base=STORE):
     if fg.get("appid") and str(fg["appid"]).isdigit():
         parent_id = int(fg["appid"])
     dlcs = [int(x) for x in entry.get("dlc") or [] if str(x).isdigit()]
-    return {
+    res = {
         "appid": int(appid),
         "name": entry.get("name") or "",
         "type": t,
@@ -71,6 +80,13 @@ def app_details(appid, base=STORE):
         "parent_name": fg.get("name"),
         "dlc": dlcs
     }
+    if base == STORE and res.get("name"):
+        try:
+            from core import appcache
+            appcache.set_info(appid, res)
+        except Exception:
+            pass
+    return res
 
 
 def parent_of(appid, base=STORE):
@@ -86,7 +102,23 @@ def dlc_ids(appid, base=STORE):
 
 
 def name_of(appid, base=STORE):
-    """Nome dell'app dallo store o None."""
+    """Nome dell'app dallo store o da cache locale."""
+    if base == STORE:
+        try:
+            from core import appinfo as ai
+            cfg = ai.config(appid)
+            if cfg and cfg.get("name"):
+                return cfg["name"]
+        except Exception:
+            pass
+        try:
+            from core import appcache
+            cached = appcache.get_info(appid)
+            if cached and isinstance(cached, dict) and cached.get("name"):
+                return cached["name"]
+        except Exception:
+            pass
     info = app_details(appid, base=base)
     return info.get("name") or None
+
 

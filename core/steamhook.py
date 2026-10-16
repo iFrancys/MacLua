@@ -3,6 +3,7 @@ Attiva il debugging CEF (porta 8080) e inietta l'interfaccia MacLua (JS/CSS) nei
 Garantisce la reversibilità totale (disinstallazione pulita con prima/dopo manifest).
 """
 import os
+import sys
 import json
 import secrets
 import urllib.request
@@ -12,6 +13,19 @@ HOOK_DIR = os.path.expanduser("~/Library/Application Support/MacLua")
 TOKEN_FILE = os.path.join(HOOK_DIR, "bridge_token")
 MANIFEST_FILE = os.path.join(HOOK_DIR, "hook_manifest.json")
 CDP_URL = "http://127.0.0.1:8080/json"
+
+
+def is_cdp_available(timeout=0.2):
+    """Verifica velocemente via socket TCP se la porta CDP 8080 è aperta (latenza <1ms)."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(("127.0.0.1", 8080))
+        s.close()
+        return True
+    except Exception:
+        return False
 
 
 def get_or_create_token():
@@ -45,7 +59,7 @@ def _candidate_markers(home=None):
 
 
 def enable_hook(home=None):
-    """Abilita l'integrazione Steam creando il marker CEF in tutte le posizioni note e registrando il manifest."""
+    """Abilita l'integrazione Steam creando il marker CEF in tutte le posizioni note, installando il LaunchAgent e registrando il manifest."""
     home = home or os.path.expanduser("~")
     os.makedirs(HOOK_DIR, exist_ok=True)
     created_markers = []
@@ -64,19 +78,28 @@ def enable_hook(home=None):
                 except OSError:
                     pass
 
+    # Assicura che il daemon del bridge sia sempre attivo e registrato come LaunchAgent
+    agent_info = install_bridge_agent(home=home)
+
     manifest = {
         "enabled": True,
         "created_markers": created_markers,
         "existed_markers": existed_markers,
+        "bridge_agent": agent_info.get("path") if agent_info.get("ok") else None,
     }
     with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
-    return {"ok": True, "created": created_markers, "existed": existed_markers}
+    return {
+        "ok": True,
+        "created": created_markers,
+        "existed": existed_markers,
+        "agent": agent_info
+    }
 
 
 def disable_hook(home=None):
-    """Rimuove l'integrazione Steam e ripristina lo stato precedente."""
+    """Rimuove l'integrazione Steam, disinstalla il LaunchAgent e ripristina lo stato precedente."""
     home = home or os.path.expanduser("~")
     manifest = {}
     if os.path.exists(MANIFEST_FILE):
@@ -102,11 +125,15 @@ def disable_hook(home=None):
             except OSError:
                 pass
 
+    # Rimuovi e scarica il LaunchAgent del bridge
+    agent_removed = remove_bridge_agent(home=home)
+
     manifest["enabled"] = False
+    manifest["bridge_agent"] = None
     with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
-    return {"ok": True, "removed": removed}
+    return {"ok": True, "removed": removed, "agent_removed": agent_removed}
 
 
 def restart_steam():
@@ -114,30 +141,80 @@ def restart_steam():
     import subprocess
     import time
 
+    # Assicura che i marker di debug siano presenti su disco
+    enable_hook()
+
     # Chiedi a Steam di chiudersi per salvare i dati
     subprocess.run(["/usr/bin/osascript", "-e", 'tell application "Steam" to quit'], capture_output=True)
 
     # Attendi che il processo termini effettivamente
     for _ in range(35):
-        p = subprocess.run(["/usr/bin/pgrep", "steam_osx"], capture_output=True)
-        if p.returncode != 0:
+        p1 = subprocess.run(["/usr/bin/pgrep", "-f", "Steam.AppBundle"], capture_output=True)
+        p2 = subprocess.run(["/usr/bin/pgrep", "-x", "Steam"], capture_output=True)
+        p3 = subprocess.run(["/usr/bin/pgrep", "steam_osx"], capture_output=True)
+        if p1.returncode != 0 and p2.returncode != 0 and p3.returncode != 0:
             break
         time.sleep(0.2)
     else:
         # Se non si chiude entro 7s, forza la terminazione
+        subprocess.run(["/usr/bin/killall", "Steam"], capture_output=True)
         subprocess.run(["/usr/bin/killall", "steam_osx"], capture_output=True)
         for _ in range(15):
-            p = subprocess.run(["/usr/bin/pgrep", "steam_osx"], capture_output=True)
-            if p.returncode != 0:
+            p1 = subprocess.run(["/usr/bin/pgrep", "-f", "Steam.AppBundle"], capture_output=True)
+            if p1.returncode != 0:
                 break
             time.sleep(0.2)
         else:
+            subprocess.run(["/usr/bin/killall", "-9", "Steam"], capture_output=True)
             subprocess.run(["/usr/bin/killall", "-9", "steam_osx"], capture_output=True)
             time.sleep(0.5)
 
     time.sleep(0.5)
     subprocess.Popen(["/usr/bin/open", "-a", "Steam", "--args", "-cef-enable-debugging"])
     return {"ok": True, "restarted": True}
+
+
+def notify_macos(title, message):
+    """Mostra una notifica nativa macOS (usata per avvisare che Steam va riavviato per le licenze)."""
+    import subprocess
+    t = str(title).replace("\\", "").replace('"', "'")
+    m = str(message).replace("\\", "").replace('"', "'")
+    try:
+        subprocess.run(
+            ["/usr/bin/osascript", "-e", f'display notification "{m}" with title "{t}"'],
+            capture_output=True, timeout=5
+        )
+        return True
+    except Exception:
+        return False
+
+
+def client_app_licensed(appid, timeout=2):
+    """Interroga il client Steam in esecuzione (SharedJSContext) sul possesso di un'app.
+    Ritorna True/False, oppure None se il client non è raggiungibile (CDP assente o Steam chiuso)."""
+    try:
+        req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            tabs = json.loads(resp.read().decode("utf-8"))
+
+        shared_tab = next((t for t in tabs if t.get("title") == "SharedJSContext"), None)
+        if not shared_tab or not shared_tab.get("webSocketDebuggerUrl"):
+            return None
+
+        client = cdp.CDPClient(shared_tab["webSocketDebuggerUrl"], timeout=timeout)
+        try:
+            res = client.evaluate(
+                f"(async () => String(await SteamClient.Apps.GetIsSubscribedApp({int(appid)})))()"
+            )
+            if res == "true":
+                return True
+            if res == "false":
+                return False
+            return None
+        finally:
+            client.close()
+    except Exception:
+        return None
 
 
 def get_status(home=None):
@@ -150,24 +227,26 @@ def get_status(home=None):
     cdp_available = False
     tabs = []
 
-    try:
-        req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            cdp_available = True
-            tabs = [
-                {"title": t.get("title"), "url": t.get("url"), "id": t.get("id")}
-                for t in data
-                if t.get("webSocketDebuggerUrl")
-            ]
-    except Exception:
-        pass
+    if is_cdp_available():
+        try:
+            req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                cdp_available = True
+                tabs = [
+                    {"title": t.get("title"), "url": t.get("url"), "id": t.get("id")}
+                    for t in data
+                    if t.get("webSocketDebuggerUrl")
+                ]
+        except Exception:
+            pass
 
     return {
         "marker_present": marker_present,
         "cdp_available": cdp_available,
         "tabs_count": len(tabs),
-        "tabs": tabs
+        "tabs": tabs,
+        "agent_installed": is_bridge_agent_installed(home)
     }
 
 
@@ -287,8 +366,35 @@ def handle_rpc_request(path, method="GET", data=None):
 
     elif path == "/cleanup-manifests":
         from core import install
-        cleaned = install.cleanup_broken_appmanifests(paths.steamapps(home))
-        return {"ok": True, "cleaned": cleaned, "count": len(cleaned)}
+        steamapps_dir = paths.steamapps(home)
+        cleaned = install.cleanup_broken_appmanifests(steamapps_dir)
+        reconciled = install.reconcile_installed_appmanifests(steamapps_dir, home=home)
+        try:
+            sync_library_in_steam(home)
+        except Exception:
+            pass
+        return {"ok": True, "cleaned": cleaned, "reconciled": reconciled, "count": len(cleaned) + len(reconciled)}
+
+    elif path == "/update":
+        aid = data.get("appid")
+        if not aid:
+            return {"ok": False, "error": "AppID mancante"}
+        try:
+            aid = int(aid)
+        except ValueError:
+            return {"ok": False, "error": "AppID non valido"}
+        import threading
+        from core import updates
+
+        def _bg_update():
+            try:
+                updates.apply_update(aid, home=home)
+                sync_library_in_steam(home)
+            except Exception:
+                pass
+
+        threading.Thread(target=_bg_update, daemon=True).start()
+        return {"ok": True, "appid": aid, "updating": True}
 
     elif path == "/library":
         from core import catalog, install, appinfo as ai
@@ -348,6 +454,7 @@ def handle_rpc_request(path, method="GET", data=None):
         _ensure(home)
 
         try:
+            remove_from_steam_library(target_id, home)
             broadcast_library_refresh(home)
         except Exception:
             pass
@@ -369,10 +476,10 @@ def handle_rpc_request(path, method="GET", data=None):
     return {"ok": False, "error": f"Endpoint non supportato: {path}"}
 
 
-def broadcast_library_refresh(home=None):
-    """Notifica in tempo reale a SharedJSContext e ai tab della Libreria l'elenco aggiornato dei giochi gestiti."""
+def get_managed_games(home=None):
+    """Ritorna la lista dei giochi gestiti da stplug-in in modo immediato senza I/O bloccante."""
     home = home or os.path.expanduser("~")
-    from core import catalog, install, appinfo as ai
+    from core import install, appinfo as ai, appcache
     stplug = paths.stplug_in(home)
     games = []
     if os.path.exists(stplug):
@@ -383,33 +490,175 @@ def broadcast_library_refresh(home=None):
                     p_id = ai.parent(aid)
                     if p_id is not None and p_id != aid:
                         continue
-                    name = catalog.name_of(aid) or f"Gioco {aid}"
+                    cfg = ai.config(aid)
+                    name = cfg.get("name")
+                    if not name:
+                        cached = appcache.get_info(aid)
+                        if cached and isinstance(cached, dict):
+                            name = cached.get("name")
+                    if not name:
+                        name = f"Gioco {aid}"
                     installed = install.is_game_installed(aid, home)
                     games.append({
                         "appid": aid,
                         "name": name,
                         "installed": installed,
+                        "cover": f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{aid}/header.jpg"
                     })
                 except Exception:
                     pass
+    return games
+
+
+def sync_library_in_steam(home=None):
+    """Sincronizza in modo pulito e sicuro i giochi gestiti in SharedJSContext di Steam.
+    - Riconcilia prima eventuali appmanifest bloccati da aggiornamenti PICS (StateFlags 6 -> 4).
+    - Imposta visible_in_game_list = true su appStore per tutti i giochi gestiti.
+    - Per i giochi installati, assicura stato pronto (installed: true, display_status: 11 'GIOCA').
+    - Per i giochi non installati, assicura stato pulito (installed: false, display_status: 9 'INSTALLA').
+    - Rispetta integralmente le collezioni dell'utente.
+    """
+    home = home or os.path.expanduser("~")
+    try:
+        from core import install
+        install.reconcile_installed_appmanifests(paths.steamapps(home), home=home)
+    except Exception:
+        pass
+
+    managed = get_managed_games(home)
+    if not managed:
+        return {"ok": True, "count": 0}
+
+    installed_aids = [g["appid"] for g in managed if g.get("installed")]
+    uninstalled_aids = [g["appid"] for g in managed if not g.get("installed")]
+    all_managed_aids = [g["appid"] for g in managed]
 
     try:
         req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
         with urllib.request.urlopen(req, timeout=1.0) as resp:
             tabs = json.loads(resp.read().decode("utf-8"))
 
-        games_json = json.dumps(games)
-        eval_script = f"if (typeof window.__MacLuaSyncLibrary === 'function') {{ window.__MacLuaSyncLibrary({games_json}); }}"
+        shared_tab = next((t for t in tabs if t.get("title") == "SharedJSContext"), None)
+        if not shared_tab or not shared_tab.get("webSocketDebuggerUrl"):
+            return {"ok": False, "error": "SharedJSContext non disponibile"}
 
-        for t in tabs:
-            url = t.get("url", "")
-            ws = t.get("webSocketDebuggerUrl")
-            if ws and ("steamloopback.host" in url or "SharedJSContext" in t.get("title", "")):
-                client = cdp.CDPClient(ws, timeout=2)
-                try:
-                    client.evaluate(eval_script)
-                finally:
-                    client.close()
+        client = cdp.CDPClient(shared_tab["webSocketDebuggerUrl"], timeout=2)
+        try:
+            aids_json = json.dumps(all_managed_aids)
+            installed_json = json.dumps(installed_aids)
+            uninstalled_json = json.dumps(uninstalled_aids)
+
+            script = f"""
+            (() => {{
+                const appStore = window.appStore;
+                const collStore = window.collectionStore;
+                if (!appStore || !collStore) return JSON.stringify({{ ok: false, error: "Stores non pronti" }});
+
+                const allManaged = {aids_json};
+                const installedSet = new Set({installed_json});
+                const uninstalled = new Set({uninstalled_json});
+
+                let modifiedCount = 0;
+                for (const aid of allManaged) {{
+                    const app = appStore.m_mapApps?.get(aid);
+                    if (app) {{
+                        if (!app.visible_in_game_list) {{
+                            app.visible_in_game_list = true;
+                            modifiedCount++;
+                        }}
+                        if (installedSet.has(aid)) {{
+                            try {{
+                                if (window.SteamClient?.Downloads?.RemoveFromDownloadList) {{
+                                    window.SteamClient.Downloads.RemoveFromDownloadList(aid);
+                                }}
+                            }} catch (e) {{}}
+                            if (app.most_available_per_client_data) {{
+                                if (!app.most_available_per_client_data.installed) {{
+                                    app.most_available_per_client_data.installed = true;
+                                    modifiedCount++;
+                                }}
+                                const ds = app.most_available_per_client_data.display_status;
+                                if (ds === 9 || ds === 20 || ds === 7 || ds === 6) {{
+                                    app.most_available_per_client_data.display_status = 11;
+                                    modifiedCount++;
+                                }}
+                            }}
+                        }} else if (uninstalled.has(aid) && app.most_available_per_client_data) {{
+                            if (app.most_available_per_client_data.installed) {{
+                                app.most_available_per_client_data.installed = false;
+                                modifiedCount++;
+                            }}
+                            if (app.most_available_per_client_data.display_status !== 9) {{
+                                app.most_available_per_client_data.display_status = 9;
+                                modifiedCount++;
+                            }}
+                        }}
+                    }}
+                }}
+
+                // Se uncategorizedCollection avesse un errore memorizzato nella cache MobX, ripristinalo
+                try {{
+                    const cs = window.collectionStore;
+                    if (cs) {{
+                        const syms = Object.getOwnPropertySymbols(cs);
+                        if (syms.length > 0) {{
+                            const mobxAdm = cs[syms[0]];
+                            const valObj = mobxAdm?.values_?.get ? mobxAdm.values_.get('uncategorizedCollection') : mobxAdm?.values_?.['uncategorizedCollection'];
+                            if (valObj && valObj.value_ && typeof valObj.value_ === 'object' && 'cause' in valObj.value_) {{
+                                valObj.value_ = valObj.derivation.call(valObj.scope_);
+                                valObj.dependenciesState_ = 0;
+                            }}
+                        }}
+                    }}
+                }} catch (e) {{}}
+
+                return JSON.stringify({{
+                    ok: true,
+                    managedCount: allManaged.length,
+                    modified: modifiedCount
+                }});
+            }})()
+            """
+            res_str = client.evaluate(script)
+            return json.loads(res_str) if res_str else {"ok": False, "error": "Nessuna risposta"}
+        finally:
+            client.close()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def remove_from_steam_library(appid, home=None):
+    """Rimuove un gioco da SharedJSContext di Steam quando rimosso da MacLua."""
+    home = home or os.path.expanduser("~")
+    try:
+        req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            tabs = json.loads(resp.read().decode("utf-8"))
+
+        shared_tab = next((t for t in tabs if t.get("title") == "SharedJSContext"), None)
+        if not shared_tab or not shared_tab.get("webSocketDebuggerUrl"):
+            return
+        client = cdp.CDPClient(shared_tab["webSocketDebuggerUrl"], timeout=2)
+        try:
+            client.evaluate(f"""
+            (() => {{
+                const aid = {int(appid)};
+                const app = window.appStore?.m_mapApps?.get(aid);
+                if (app) app.visible_in_game_list = false;
+            }})()
+            """)
+        finally:
+            client.close()
+    except Exception:
+        pass
+
+
+def broadcast_library_refresh(home=None):
+    """Notifica che la libreria gestita è stata aggiornata e sincronizza SharedJSContext."""
+    home = home or os.path.expanduser("~")
+    games = get_managed_games(home)
+    try:
+        sync_library_in_steam(home)
     except Exception:
         pass
     return {"ok": True, "count": len(games)}
@@ -452,16 +701,16 @@ def drain_tab_rpc(client):
 
 
 def drain_all_tabs_rpc():
-    """Drena le richieste RPC da tutti i tab attivi di Steam."""
+    """Drena le richieste RPC dal tab attivo dello Store di Steam."""
     try:
         req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
-        with urllib.request.urlopen(req, timeout=1.0) as resp:
+        with urllib.request.urlopen(req, timeout=0.8) as resp:
             tabs = json.loads(resp.read().decode("utf-8"))
         for t in tabs:
             url = t.get("url", "")
             ws = t.get("webSocketDebuggerUrl")
-            if ws and ("store.steampowered.com" in url or "steamloopback.host" in url):
-                client = cdp.CDPClient(ws, timeout=2)
+            if ws and "store.steampowered.com" in url:
+                client = cdp.CDPClient(ws, timeout=1.5)
                 try:
                     drain_tab_rpc(client)
                 finally:
@@ -471,7 +720,7 @@ def drain_all_tabs_rpc():
 
 
 def inject_into_tabs(token=None, js_code=None, css_code=None, force=False):
-    """Inietta maclua.js e maclua.css in tutti i tab idonei di Steam (Store e Library)."""
+    """Inietta maclua.js e maclua.css nei tab dello Store di Steam."""
     token = token or get_or_create_token()
     if js_code is None:
         js_path = os.path.join(os.path.dirname(__file__), "steamui", "maclua.js")
@@ -491,15 +740,19 @@ def inject_into_tabs(token=None, js_code=None, css_code=None, force=False):
 
     injected = []
     try:
-        with urllib.request.urlopen(CDP_URL, timeout=2) as resp:
+        with urllib.request.urlopen(CDP_URL, timeout=1.0) as resp:
             tabs = json.loads(resp.read().decode("utf-8"))
 
         css_escaped = json.dumps(css_code)
+        initial_games = get_managed_games()
+        games_json = json.dumps(initial_games)
+
         bootstrap = f"""
         (function() {{
             window.__MACLUA = {{
                 token: "{token}",
-                base: "http://127.0.0.1:6767"
+                base: "http://127.0.0.1:6767",
+                initialGames: {games_json}
             }};
             if (!document.getElementById("maclua-injected-style")) {{
                 var st = document.createElement("style");
@@ -514,13 +767,18 @@ def inject_into_tabs(token=None, js_code=None, css_code=None, force=False):
         for t in tabs:
             url = t.get("url", "")
             ws = t.get("webSocketDebuggerUrl")
-            if ws and ("store.steampowered.com" in url or "steamloopback.host" in url):
-                client = cdp.CDPClient(ws, timeout=3)
+            # Inietta solo ed esclusivamente nei tab dello store: non toccare mai la libreria o l'interfaccia interna
+            if ws and "store.steampowered.com" in url:
+                client = cdp.CDPClient(ws, timeout=2.0)
                 try:
                     has_ver = client.evaluate("String(window.__MacLuaVersion)")
-                    if force or has_ver != "4":
+                    has_btn = client.evaluate("String(Boolean(document.getElementById('maclua-store-header-btn')))")
+                    if force or has_ver != "9":
+                        client.add_script_on_new_document(full_script)
                         client.evaluate(full_script)
                         injected.append({"id": t.get("id"), "url": url, "title": t.get("title")})
+                    elif has_btn != "true":
+                        client.evaluate("if (typeof window.ensureCartHeaderButton === 'function') window.ensureCartHeaderButton();")
                     drain_tab_rpc(client)
                 finally:
                     client.close()
@@ -543,8 +801,9 @@ def install_bridge_agent(python_path=None, script_path=None, home=None):
     home = home or os.path.expanduser("~")
     plist_path = bridge_agent_path(home)
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
-    py = python_path or "/usr/bin/python3"
-    sc = script_path or os.path.expanduser("~/Desktop/MacLua/maclua.py")
+    py = python_path or sys.executable or "/usr/bin/python3"
+    default_sc = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "maclua.py"))
+    sc = script_path or default_sc
 
     content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -573,6 +832,7 @@ def install_bridge_agent(python_path=None, script_path=None, home=None):
     with open(plist_path, "w", encoding="utf-8") as f:
         f.write(content)
     import subprocess
+    subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
     subprocess.run(["launchctl", "load", "-w", plist_path], capture_output=True)
     return {"ok": True, "path": plist_path}
 

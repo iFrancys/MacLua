@@ -10,15 +10,30 @@ rust/target/
 *.tmp
 *.tmp.*
 
-# App bundles
+# App bundles and virtual environments
 MacLua.app/
 native/MacLua.app/
+.venv/
+venv/
+env/
 
 # Pytest / Python cache
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
+*.egg-info/
+dist/
+build/
 
-# User & local state
+# Local logs and user state
+*.log
 hook_manifest.json
 .managed.json
+.superpowers/
+
+# IDE and editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace

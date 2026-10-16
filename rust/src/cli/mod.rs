@@ -279,10 +279,27 @@ pub async fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Poison packageinfo
             let mut appids = std::collections::HashSet::new();
             let mut depotids = std::collections::HashSet::new();
+
+            if let Ok(entries) = std::fs::read_dir(&stplug) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("lua") {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            if let Ok(aid) = stem.parse::<u32>() {
+                                appids.insert(aid);
+                            }
+                        }
+                    }
+                }
+            }
+
             for (did, (aid, _)) in &keys {
                 appids.insert(*aid);
                 depotids.insert(*did);
             }
+
+            let steamapps = paths::steamapps_dir();
+            install::cleanup_broken_appmanifests(&steamapps);
 
             let pkginfo = paths::packageinfo_path();
             let (added_app, added_dep) = if pkginfo.exists() {
@@ -539,15 +556,12 @@ pub async fn run_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Install { appid } => {
             let steamapps = paths::steamapps_dir();
-            let _appinfo_path = paths::appinfo_path();
-            let name = format!("App {}", appid);
-            let installdir = name.clone();
-            let _ = install::create_appmanifest(&steamapps, appid, &name, &installdir, 0, "0");
+            install::cleanup_broken_appmanifests(&steamapps);
 
             if is_json {
                 println!("{}", serde_json::to_string(&json!({ "ok": true, "appid": appid }))?);
             } else {
-                println!("Appmanifest creato per appid {}", appid);
+                println!("Pronto per installazione in Steam per appid {}", appid);
             }
         }
 

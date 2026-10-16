@@ -277,29 +277,323 @@
   transition: width 0.3s ease;
 }
 
+/* Quadratino con logo MacLua affianco al blocco del carrello */
+.maclua-store-header-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  margin: 0 6px !important;
+  padding: 0 !important;
+  background: rgba(33, 44, 61, 0.95) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 3px !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+  align-self: center !important;
+  line-height: 1 !important;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
+
+.maclua-store-header-btn:hover {
+  background: rgba(46, 61, 85, 0.98) !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.45) !important;
+}
+
+.maclua-store-header-btn:active {
+  transform: translateY(1px);
+}
+
+.maclua-store-header-btn .maclua-header-icon {
+  width: 18px !important;
+  height: 18px !important;
+  object-fit: contain !important;
+  display: block !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
 /* Modale overlay MacLua */
 .maclua-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   z-index: 9999999;
   display: flex;
   align-items: center;
   justify-content: center;
+  animation: macluaFadeIn 0.2s ease-out;
 }
 
 .maclua-modal-content {
-  width: 580px;
-  max-height: 80vh;
-  background: var(--maclua-bg);
-  border: 1px solid var(--maclua-border);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
-  color: var(--maclua-text);
+  width: 540px;
+  max-width: 92vw;
+  max-height: 85vh;
+  background: #171d25;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.2);
+  color: #f8fafc;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
+
+.maclua-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: rgba(23, 29, 37, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.maclua-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #38bdf8;
+  letter-spacing: 0.3px;
+}
+
+.maclua-title-logo {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.maclua-modal-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.maclua-modal-close:hover {
+  color: #f8fafc;
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.maclua-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.maclua-setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.maclua-setting-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.maclua-setting-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.maclua-select, .maclua-input {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #f8fafc;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.maclua-select:focus, .maclua-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.3);
+}
+
+.maclua-toggles {
+  gap: 12px;
+}
+
+.maclua-toggle-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.maclua-toggle-item input[type="checkbox"] {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.maclua-toggle-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.maclua-toggle-text strong {
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.maclua-toggle-text small {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.maclua-actions-row {
+  display: flex;
+  gap: 10px;
+}
+
+.maclua-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.maclua-btn-primary {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+}
+
+.maclua-btn-primary:hover {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+
+.maclua-btn-secondary {
+  background: rgba(30, 41, 59, 0.9);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.maclua-btn-secondary:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.maclua-btn-cancel {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.maclua-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+}
+
+.maclua-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  background: rgba(23, 29, 37, 0.95);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.maclua-managed-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.maclua-game-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.maclua-game-item-name {
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.maclua-game-item-id {
+  font-size: 11px;
+  color: #64748b;
+  margin-left: 6px;
+}
+
+.maclua-btn-remove {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.maclua-btn-remove:hover {
+  background: rgba(239, 68, 68, 0.35);
+  color: #ffffff;
+}
+
+.maclua-btn-update {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-right: 6px;
+  transition: all 0.15s ease;
+}
+
+.maclua-btn-update:hover {
+  background: rgba(56, 189, 248, 0.35);
+  color: #ffffff;
+}
+

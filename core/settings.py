@@ -1,5 +1,5 @@
 """Gestione impostazioni centralizzate di MacLua.
-Condivise tra il backend Python, il bridge HTTP, l'interfaccia in-Steam e l'app Swift.
+Condivise tra il backend Python, il bridge HTTP e l'interfaccia in-Steam.
 File memorizzato in ~/Library/Application Support/MacLua/settings.json.
 """
 import os
@@ -23,6 +23,9 @@ DEFAULT_SETTINGS = {
     "background_blur": 15.0,
     "background_dim": 0.35,
     "low_power_pause_gif": True,
+    "preferred_source": "auto",   # "auto", "sushi", "ryuu", "hubcap"
+    "hubcap_key": "",
+    "donate_keys": False,
 }
 
 
@@ -34,16 +37,22 @@ def get_all():
     _ensure_dir()
     if not os.path.exists(SETTINGS_FILE):
         save_all(DEFAULT_SETTINGS)
-        return dict(DEFAULT_SETTINGS)
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # Assicura tutti i campi predefiniti
-        merged = dict(DEFAULT_SETTINGS)
-        merged.update(data)
-        return merged
-    except Exception:
-        return dict(DEFAULT_SETTINGS)
+        data = dict(DEFAULT_SETTINGS)
+    else:
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    merged = dict(DEFAULT_SETTINGS)
+    merged.update(data)
+    # Sincronizza hubcap_key con config.py se vuoto
+    if not merged.get("hubcap_key"):
+        from core import config
+        k = config.get_key()
+        if k:
+            merged["hubcap_key"] = k
+    return merged
 
 
 def get(key, default=None):
@@ -54,6 +63,12 @@ def get(key, default=None):
 def set_val(key, value):
     settings = get_all()
     settings[key] = value
+    if key == "hubcap_key" and value:
+        try:
+            from core import config
+            config.set_key(None, value)
+        except Exception:
+            pass
     save_all(settings)
     return settings
 

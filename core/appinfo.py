@@ -50,7 +50,28 @@ def _parse(d, names, off, end):
     return out, off
 
 
-def _find(d, appid):
+_CACHE = {}
+
+
+def _get_cache(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+
+    entry_data = _CACHE.get(path)
+    if entry_data and entry_data["mtime"] == mtime:
+        return entry_data
+
+    try:
+        with open(path, "rb") as f:
+            d = f.read()
+    except OSError:
+        return None
+
+    names = _string_table(d)
     anchors = []
     i = 0
     while True:
@@ -59,27 +80,63 @@ def _find(d, appid):
             break
         anchors.append(i)
         i += 1
+
+    index = {}
     for k, a in enumerate(anchors):
-        if struct.unpack_from("<I", d, a + 5)[0] == appid:
+        if a + 9 <= len(d):
+            aid = struct.unpack_from("<I", d, a + 5)[0]
             start = a - 5
             end = anchors[k + 1] - 5 if k + 1 < len(anchors) else len(d)
-            return start, end
-    return None
+            index[aid] = (start, end)
+
+    cached = {
+        "mtime": mtime,
+        "data": d,
+        "names": names,
+        "index": index,
+        "parsed": {}
+    }
+    _CACHE[path] = cached
+    return cached
 
 
 def entry(appid, path=None):
-    """Ramo figlio di 'appinfo', o None se l'app non è in cache."""
+    """Ramo figlio di 'appinfo', o None se l'app non è in cache (con cache I/O mtime)."""
     path = path or os.path.join(paths.appcache(), "appinfo.vdf")
-    with open(path, "rb") as f:
-        d = f.read()
-    span = _find(d, appid)
+    c = _get_cache(path)
+    if not c:
+        return None
+    if appid in c["parsed"]:
+        return c["parsed"][appid]
+    span = c["index"].get(appid)
     if span is None:
         return None
-    names = _string_table(d)
-    tree, _ = _parse(d, names, span[0], span[1])
+    tree, _ = _parse(c["data"], c["names"], span[0], span[1])
     if not tree or tree[0][0] != "appinfo":
+        c["parsed"][appid] = None
         return None
-    return tree[0][1]
+    res = tree[0][1]
+    c["parsed"][appid] = res
+    return res
+
+
+def appinfo_of(appid, path=None):
+    """Dizionario con i metadati per appid (extended, common, ecc.)."""
+    root = entry(appid, path)
+    if not root:
+        return {}
+
+    def _convert(nodes):
+        res = {}
+        for k, v in nodes:
+            if isinstance(v, list):
+                res[k] = _convert(v)
+            else:
+                res[k] = v
+        return res
+
+    return _convert(root)
+
 
 
 def _child(nodes, name):

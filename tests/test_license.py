@@ -85,6 +85,8 @@ def test_forge_adds_package_with_valid_entry_hash(tmp_path):
     r = Reader(data[kv_start:])
     node = parse_node(r)
     assert node[0] == "sec" and node[1] == str(FORGE_ID)
+    term = parse_node(r)
+    assert term == ("end",)
     kv = data[kv_start:kv_start + r.o]
     assert hashlib.sha1(kv).digest() == h
     appids = {v for _, _, v in next(

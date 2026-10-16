@@ -126,10 +126,11 @@ def _ensure(home):
     all_keys = depotkeys.collect_keys(sp)
     depotkeys.sync_config_vdf(os.path.join(paths.steam_config(home), "config.vdf"), all_keys)
 
-    # Pulisce eventuali appmanifest fantasma (StateFlags 2/18 con size 0) che causano "DOWNLOAD RICHIESTO"
+    # Pulisce eventuali appmanifest fantasma (StateFlags 2/18 con size 0) e riconcilia i giochi installati
     from core import install
     steamapps_dir = paths.steamapps(home)
     install.cleanup_broken_appmanifests(steamapps_dir)
+    install.reconcile_installed_appmanifests(steamapps_dir, home=home)
 
     return {"apps": sorted(roots), "licensed_apps": sorted(appids), "added": added, "removed": removed,
             "staged": staged, "keys": nkeys}
@@ -247,17 +248,27 @@ def cmd_add(args):
 
 def cmd_update(args):
     import time
-    from core import config, install, source
+    from core import appinfo as ai, config, install, settings, source
     home = os.path.expanduser("~")
 
-    # Controlla se la sorgente ha un aggiornamento del lua (o nuovi DLC/depot)
-    key = config.get_key(home)
-    if key:
-        try:
-            fetched = source.fetch_lua(args.appid, key)
-            install.import_lua(args.appid, fetched["lua"], fetched["manifests"], home)
-        except Exception:
-            pass
+    # Scarica sempre eventuali nuovi manifest/lua dalle sorgenti (anche gratuite: Sushi, Ryuu, GitHub mirror)
+    key = config.get_key(home) or settings.get("hubcap_key", "")
+    pref = settings.get("preferred_source", "auto")
+    try:
+        target_gids = {int(d["id"]): str(d["gid"]) for d in (ai.depots(args.appid) or []) if d.get("gid")}
+    except Exception:
+        target_gids = {}
+    try:
+        fetched = source.fetch_from_sources(
+            args.appid,
+            key=key,
+            preferred_source=pref,
+            auto_update=True,
+            target_gids=target_gids,
+        )
+        install.import_lua(args.appid, fetched["lua"], fetched["manifests"], home)
+    except Exception:
+        pass
 
     rep = _ensure(home)
     prog = {"bytes": 0, "total_bytes": 0, "total_mb": 0.0}
@@ -289,6 +300,14 @@ def cmd_update(args):
         depotcache_dir=paths.depotcache(home), workers=args.jobs,
         dry_run=args.dry_run, progress=None if args.dry_run else progress,
         totals=prog)
+    if not args.dry_run:
+        install.reconcile_installed_appmanifests(paths.steamapps(home), home=home)
+        try:
+            from core import steamhook
+            if steamhook.is_cdp_available(0.1):
+                steamhook.sync_library_in_steam(home)
+        except Exception:
+            pass
     if getattr(args, "json", False):
         if not args.dry_run:
             tot = prog.get("total_bytes") or int(prog.get("total_mb", 0) * 1e6)
