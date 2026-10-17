@@ -54,8 +54,10 @@ def test_notify_macos_failure_is_silent():
 
 
 def test_sync_library_script_never_touches_mobx_internals(tmp_path):
-    """Regressione: la sincronizzazione deve assegnare solo proprietà osservabili pubbliche di appStore,
-    senza toccare i simboli privati interni di MobX (value_, dependenciesState_, onBecomeStale_) né il fiber React."""
+    """Regressione: la sincronizzazione deve assegnare solo proprietà osservabili pubbliche di appStore
+    e invocare i metodi pubblici delle collezioni (ClearAppCounts, SetApps),
+    senza mai toccare i simboli privati interni di MobX (getOwnPropertySymbols, value_,
+    dependenciesState_, onBecomeStale_, derivation) né il fiber React."""
     tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
     captured = {}
 
@@ -75,14 +77,15 @@ def test_sync_library_script_never_touches_mobx_internals(tmp_path):
     assert res["ok"] is True
     script = captured["script"]
     # Nessuna manipolazione unsafe dei simboli privati di MobX o del fiber di React
+    assert "getOwnPropertySymbols" not in script
     assert "dependenciesState_" not in script
     assert "onBecomeStale_" not in script
     assert "derivation" not in script
     assert "__reactFiber" not in script
     assert "ReactVirtualized" not in script
-    # Nessuna corruzione della cache di collectionStore
-    assert "collectionStore" not in script
-    # L'aggiornamento sicuro delle proprietà osservabili resta presente
+    # Uso esclusivo dei metodi pubblici ufficiali per le collezioni e proprietà di appStore
+    assert "ClearAppCounts" in script
+    assert "SetApps" in script
     assert "visible_in_game_list" in script
     assert "appStore.m_mapApps" in script
 
@@ -90,4 +93,5 @@ def test_sync_library_script_never_touches_mobx_internals(tmp_path):
 def test_refresh_steam_ui_tabs_removed():
     """La manipolazione del fiber ReactVirtualized è stata rimossa perché corrompeva MobX."""
     assert not hasattr(steamhook, "refresh_steam_ui_tabs")
+
 

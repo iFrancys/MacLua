@@ -586,29 +586,72 @@ def sync_library_in_steam(home=None):
                                     window.SteamClient.Downloads.RemoveFromDownloadList(aid);
                                 }}
                             }} catch (e) {{}}
-                            if (app.most_available_per_client_data) {{
-                                if (!app.most_available_per_client_data.installed) {{
-                                    app.most_available_per_client_data.installed = true;
-                                    modifiedCount++;
-                                }}
-                                const ds = app.most_available_per_client_data.display_status;
-                                if (ds === 9 || ds === 20 || ds === 7 || ds === 6) {{
-                                    app.most_available_per_client_data.display_status = 11;
-                                    modifiedCount++;
+                            for (const pcd of [app.most_available_per_client_data, app.local_per_client_data, ...(app.per_client_data || [])]) {{
+                                if (pcd) {{
+                                    if (!pcd.installed) {{
+                                        pcd.installed = true;
+                                        modifiedCount++;
+                                    }}
+                                    const ds = pcd.display_status;
+                                    if (ds === 9 || ds === 20 || ds === 7 || ds === 6 || ds === 34) {{
+                                        pcd.display_status = 11;
+                                        modifiedCount++;
+                                    }}
                                 }}
                             }}
-                        }} else if (uninstalled.has(aid) && app.most_available_per_client_data) {{
-                            if (app.most_available_per_client_data.installed) {{
-                                app.most_available_per_client_data.installed = false;
-                                modifiedCount++;
-                            }}
-                            if (app.most_available_per_client_data.display_status !== 9) {{
-                                app.most_available_per_client_data.display_status = 9;
-                                modifiedCount++;
+                        }} else if (uninstalled.has(aid)) {{
+                            for (const pcd of [app.most_available_per_client_data, app.local_per_client_data, ...(app.per_client_data || [])]) {{
+                                if (pcd) {{
+                                    if (pcd.installed) {{
+                                        pcd.installed = false;
+                                        modifiedCount++;
+                                    }}
+                                    if (pcd.display_status !== 9) {{
+                                        pcd.display_status = 9;
+                                        modifiedCount++;
+                                    }}
+                                }}
                             }}
                         }}
                     }}
                 }}
+
+                // Sincronizza le collezioni usando ESCLUSIVAMENTE i metodi pubblici nativi di Steam
+                // (ClearAppCounts + SetApps) senza mai toccare i simboli privati interni di MobX.
+                try {{
+                    const cs = window.collectionStore;
+                    if (cs) {{
+                        const allCols = [
+                            cs.uncategorizedCollection,
+                            ...(cs.userCollections || [])
+                        ];
+                        for (const col of allCols) {{
+                            if (!col) continue;
+                            const isLuaCol = (col.displayName || '').trim().toLowerCase() === 'lua';
+                            let addedToLua = false;
+                            if (isLuaCol && col.m_setApps) {{
+                                const removed = col.m_setRemovedManually;
+                                for (const aid of allManaged) {{
+                                    if (appStore.m_mapApps?.has(aid) && !col.m_setApps.has(aid) && !(removed && removed.has(aid))) {{
+                                        col.m_setApps.add(aid);
+                                        if (col.m_setAddedManually) col.m_setAddedManually.add(aid);
+                                        addedToLua = true;
+                                    }}
+                                }}
+                            }}
+                            const allLen = col.allApps ? col.allApps.length : 0;
+                            const visLen = col.visibleApps ? col.visibleApps.length : 0;
+                            const countsStale = col.m_mapFilterToAppCounts && col.m_mapFilterToAppCounts.size > 0 &&
+                                Array.from(col.m_mapFilterToAppCounts.values()).some(v => v < visLen || v < allLen);
+                            if (modifiedCount > 0 || addedToLua || visLen < allLen || countsStale) {{
+                                if (typeof col.ClearAppCounts === 'function') col.ClearAppCounts();
+                                if (typeof col.SetApps === 'function' && col.m_setApps) {{
+                                    col.SetApps(Array.from(col.m_setApps));
+                                }}
+                            }}
+                        }}
+                    }}
+                }} catch (e) {{}}
 
                 return JSON.stringify({{
                     ok: true,

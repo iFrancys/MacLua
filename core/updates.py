@@ -99,10 +99,36 @@ def apply_update(appid, home=None, workers=8, progress=None):
     pref = settings.get("preferred_source", "auto")
 
     try:
-        app_depots = ai.depots(appid)
+        app_depots = list(ai.depots(appid))
     except Exception:
         app_depots = []
-    target_gids = {int(d["id"]): str(d["gid"]) for d in (app_depots or []) if d.get("gid")}
+
+    lua_path = os.path.join(paths.stplug_in(home), f"{appid}.lua")
+    keyed_depots = None
+    if os.path.exists(lua_path):
+        try:
+            from core.lua import parse_lua
+            with open(lua_path, "r", encoding="utf-8", errors="replace") as f:
+                keyed_depots = set(parse_lua(f.read()).get("keys", {}).keys())
+        except Exception:
+            keyed_depots = None
+
+    if keyed_depots and app_depots:
+        wanted_deps, _ = install.select_depots(appid, keyed_depots, app_depots)
+        wanted_set = set(wanted_deps)
+        target_gids = {
+            int(d["id"]): str(d["gid"])
+            for d in app_depots
+            if d.get("gid") and int(d["id"]) in wanted_set
+        }
+    else:
+        target_gids = {
+            int(d["id"]): str(d["gid"])
+            for d in (app_depots or [])
+            if d.get("gid")
+            and not d.get("shared")
+            and str(d.get("oslist") or "").lower() in ("macos", "osx", "mac", "macosx", "")
+        }
 
     fetched = None
     try:

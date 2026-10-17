@@ -235,3 +235,26 @@ def test_verify_detects_corruption(tmp_path):
     bad = I.verify_app(10, steamapps_dir=str(steamapps),
                        store_dir=str(store))
     assert bad == ["Demo.app/Contents/game.bin"]
+
+
+def test_fix_executables_never_creates_real_wrappers_and_unwraps_legacy(tmp_path):
+    macos_dir = tmp_path / "Game.app" / "Contents" / "MacOS"
+    res_dir = tmp_path / "Game.app" / "Contents" / "Resources"
+    macos_dir.mkdir(parents=True)
+    res_dir.mkdir(parents=True)
+
+    # Simula un bundle con un eseguibile Mach-O e una dylib Mach-O (incluso un residuo .real)
+    real_exe = b"\xcf\xfa\xed\xfe" + b"REAL_GAME_BINARY"
+    real_dylib = b"\xca\xfe\xba\xbe" + b"REAL_STEAM_API_DYLIB"
+    (macos_dir / "Game").write_bytes(b"\xcf\xfa\xed\xfe" + b"FAKE_LAUNCHER")
+    (macos_dir / "Game.real").write_bytes(real_exe)
+    (macos_dir / "libsteam_api.dylib").write_bytes(b"\xcf\xfa\xed\xfe" + b"FAKE_LAUNCHER")
+    (macos_dir / "libsteam_api.dylib.real").write_bytes(real_dylib)
+
+    install.fix_executables(str(tmp_path))
+
+    assert not (macos_dir / "Game.real").exists()
+    assert not (macos_dir / "libsteam_api.dylib.real").exists()
+    assert (macos_dir / "Game").read_bytes() == real_exe
+    assert (macos_dir / "libsteam_api.dylib").read_bytes() == real_dylib
+

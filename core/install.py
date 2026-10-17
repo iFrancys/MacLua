@@ -303,6 +303,13 @@ def reconcile_installed_appmanifests(steamapps_dir, home=None):
         except OSError:
             continue
 
+        try:
+            g_dir = os.path.join(steamapps_dir, "common", _installdir_of(txt))
+            if os.path.isdir(g_dir):
+                unwrap_executables(g_dir)
+        except Exception:
+            pass
+
         m_flags = re.search(r'"StateFlags"\s+"(\d+)"', txt)
         m_build = re.search(r'"buildid"\s+"(\d+)"', txt)
         m_size = re.search(r'"SizeOnDisk"\s+"(\d+)"', txt)
@@ -483,64 +490,9 @@ def patch_appmanifest(acf_path, depot_info, size_on_disk, buildid=None):
     return acf_path
 
 
-def _create_macho_launcher(dest_path, target_real_name):
-    """Crea un launcher Mach-O nativo universale (arm64 + x86_64) per i bundle macOS.
-    Questo permette a Steam di tracciare il processo nativamente senza fallire
-    la gestione del processo POSIX e senza che l'overlay chiuda l'applicazione."""
-    import subprocess
-    import tempfile
-
-    src = (
-        '#include <unistd.h>\n'
-        '#include <libgen.h>\n'
-        '#include <mach-o/dyld.h>\n'
-        '#include <stdio.h>\n'
-        'int main(int argc, char *argv[]) {\n'
-        '    char path[1024]; uint32_t size = sizeof(path);\n'
-        '    if (_NSGetExecutablePath(path, &size) != 0) return 1;\n'
-        '    char *dir = dirname(path);\n'
-        '    chdir(dir);\n'
-        '    chdir("../Resources");\n'
-        '    char real_path[1024];\n'
-        '    snprintf(real_path, sizeof(real_path), "%s/' + target_real_name + '", dir);\n'
-        '    execv(real_path, argv);\n'
-        '    return 1;\n'
-        '}\n'
-    )
-    with tempfile.NamedTemporaryFile(suffix=".c", mode="w", delete=False) as tf:
-        tf.write(src)
-        c_path = tf.name
-    try:
-        cmd = ["clang", "-O2", "-arch", "arm64", "-arch", "x86_64", c_path, "-o", dest_path]
-        res = subprocess.run(cmd, capture_output=True)
-        if res.returncode == 0:
-            subprocess.run(["codesign", "--force", "--sign", "-", dest_path], capture_output=True)
-            os.chmod(dest_path, 0o755)
-            return True
-    except Exception:
-        pass
-    finally:
-        try:
-            os.unlink(c_path)
-        except OSError:
-            pass
-
-    # Fallback sicuro nel caso in cui clang non sia disponibile
-    wrapper = (
-        '#!/bin/bash\n'
-        'DIR="$(cd "$(dirname "$0")" && pwd)"\n'
-        'cd "$DIR/../Resources"\n'
-        'exec "$DIR/%s" "$@"\n' % target_real_name
-    )
-    with open(dest_path, "w", encoding="utf-8") as wf:
-        wf.write(wrapper)
-    os.chmod(dest_path, 0o755)
-    return False
-
-
 def unwrap_executables(root):
-    """Ripristina temporaneamente <bin>.real -> <bin> nei bundle .app prima di un update in-place,
-    così download_file può riutilizzare tutti i chunk invariati dell'eseguibile reale."""
+    """Ripristina eventuali file <bin>.real -> <bin> nei bundle .app,
+    garantendo che gli eseguibili e le librerie (.dylib) rimangano integri e nativi."""
     unwrapped = 0
     if not os.path.isdir(root):
         return unwrapped
@@ -560,9 +512,17 @@ def unwrap_executables(root):
 
 
 def fix_executables(root):
-    """+x su Mach-O e script (il manifest non porta il bit exec)."""
+    """Imposta i permessi di esecuzione (+x) su binari Mach-O e script,
+    ripristina eventuali .real residui senza mai alterare i binari o le dylib del bundle,
+    e verifica/ripara la firma digitale dei bundle .app se necessario."""
+    import subprocess
+    unwrap_executables(root)
     fixed = 0
-    for dirpath, _, filenames in os.walk(root):
+    app_bundles = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for d in dirnames:
+            if d.endswith(".app"):
+                app_bundles.append(os.path.join(dirpath, d))
         for fn in filenames:
             p = os.path.join(dirpath, fn)
             try:
@@ -576,45 +536,24 @@ def fix_executables(root):
                 os.chmod(p, 0o755)
                 fixed += 1
 
-    # Per bundle macOS (.app) che contengono Resources/:
-    # crea launcher Mach-O che garantisce la corretta working directory all'avvio
-    # e permette il tracciamento diretto da parte del client Steam.
-    for dirpath, dirs, _ in os.walk(root):
-        if dirpath.endswith(".app/Contents/MacOS"):
-            res_dir = os.path.normpath(os.path.join(dirpath, "../Resources"))
-            if os.path.isdir(res_dir):
-                for fn in os.listdir(dirpath):
-                    if fn.endswith(".real"):
-                        continue
-                    p = os.path.join(dirpath, fn)
-                    real_p = p + ".real"
-                    if os.path.isfile(p):
-                        try:
-                            with open(p, "rb") as f:
-                                head = f.read(4)
-                            if head in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
-                                        b"\xca\xfe\xba\xbe", b"\xce\xfa\xed\xfe",
-                                        b"\xcf\xfa\xed\xfe"):
-                                is_already_launcher = False
-                                if os.path.exists(real_p):
-                                    try:
-                                        with open(p, "rb") as lf:
-                                            blob = lf.read(131072)
-                                        if (fn + ".real").encode("utf-8") in blob or b"../Resources" in blob:
-                                            is_already_launcher = True
-                                    except OSError:
-                                        pass
-                                if not is_already_launcher:
-                                    os.replace(p, real_p)
-                                    _create_macho_launcher(p, fn + ".real")
-                                    os.chmod(real_p, 0o755)
-                                    fixed += 1
-                            elif head.startswith(b"#!") and os.path.exists(real_p):
-                                _create_macho_launcher(p, fn + ".real")
-                                os.chmod(real_p, 0o755)
-                                fixed += 1
-                        except OSError:
-                            pass
+    # Verifica che ogni bundle .app abbia una firma valida su disco (necessaria per taskgated su Apple Silicon).
+    # Se la firma originale dello sviluppatore è valida, non viene toccata; se è assente o corrotta,
+    # applica una firma ad-hoc completa (--force --deep --sign -) sull'intero bundle.
+    for bundle in app_bundles:
+        try:
+            chk = subprocess.run(
+                ["codesign", "-vvv", "--deep", "--strict", bundle],
+                capture_output=True,
+                timeout=30,
+            )
+            if chk.returncode != 0:
+                subprocess.run(
+                    ["codesign", "--force", "--deep", "--sign", "-", bundle],
+                    capture_output=True,
+                    timeout=60,
+                )
+        except Exception:
+            pass
     return fixed
 
 
@@ -693,6 +632,43 @@ def fetch_app(appid, stplug_dir, cache_dir, store_dir, steamapps_dir,
 
     # Ripristina eventuali .real -> eseguibile prima del download delta in-place
     unwrap_executables(out)
+
+    # Rimuovi file obsoleti appartenenti a versioni precedenti del manifest dello stesso depot
+    old_gids = dict(installed_gids(acf_text))
+    prev_state = read_installed_state(store_dir, appid)
+    if prev_state and isinstance(prev_state.get("depots"), dict):
+        for k_dep, v_gid in prev_state["depots"].items():
+            if str(k_dep).isdigit():
+                old_gids[int(k_dep)] = str(v_gid)
+    for depot, new_info, _ in parsed:
+        old_gid = old_gids.get(depot)
+        if old_gid and str(old_gid) != str(new_info.get("gid")):
+            for d_cand in (store_dir, depotcache_dir):
+                if not d_cand:
+                    continue
+                old_man_p = os.path.join(d_cand, "%d_%s.manifest" % (depot, old_gid))
+                if os.path.exists(old_man_p):
+                    try:
+                        old_info = manifest.parse_manifest(old_man_p)
+                        new_rels = {
+                            fetch._norm_path(e["name"])
+                            for e in new_info["files"]
+                            if not (e.get("flags", 0) & fetch.FLAG_DIRECTORY)
+                        }
+                        for old_e in old_info["files"]:
+                            if old_e.get("flags", 0) & fetch.FLAG_DIRECTORY:
+                                continue
+                            old_rel = fetch._norm_path(old_e["name"])
+                            if old_rel not in new_rels:
+                                obsolete_p = os.path.join(out, old_rel)
+                                if os.path.isfile(obsolete_p) or os.path.islink(obsolete_p):
+                                    try:
+                                        os.remove(obsolete_p)
+                                    except OSError:
+                                        pass
+                    except Exception:
+                        pass
+                    break
 
     import concurrent.futures
     for depot, info, key in parsed:
