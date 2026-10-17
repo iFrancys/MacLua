@@ -52,3 +52,42 @@ def test_notify_macos_failure_is_silent():
     with patch("subprocess.run", side_effect=OSError):
         assert steamhook.notify_macos("MacLua", "test") is False
 
+
+def test_sync_library_script_never_touches_mobx_internals(tmp_path):
+    """Regressione: la sincronizzazione deve assegnare solo proprietà osservabili pubbliche di appStore,
+    senza toccare i simboli privati interni di MobX (value_, dependenciesState_, onBecomeStale_) né il fiber React."""
+    tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
+    captured = {}
+
+    fake_client = MagicMock()
+
+    def _evaluate(script, *args, **kwargs):
+        captured["script"] = script
+        return json.dumps({"ok": True})
+
+    fake_client.evaluate.side_effect = _evaluate
+
+    with patch("core.steamhook.get_managed_games", return_value=[{"appid": 123, "installed": True}]), \
+         patch("core.steamhook.urllib.request.urlopen", return_value=_fake_urlopen(tabs)), \
+         patch("core.steamhook.cdp.CDPClient", return_value=fake_client):
+        res = steamhook.sync_library_in_steam(home=str(tmp_path))
+
+    assert res["ok"] is True
+    script = captured["script"]
+    # Nessuna manipolazione unsafe dei simboli privati di MobX o del fiber di React
+    assert "dependenciesState_" not in script
+    assert "onBecomeStale_" not in script
+    assert "derivation" not in script
+    assert "__reactFiber" not in script
+    assert "ReactVirtualized" not in script
+    # Nessuna corruzione della cache di collectionStore
+    assert "collectionStore" not in script
+    # L'aggiornamento sicuro delle proprietà osservabili resta presente
+    assert "visible_in_game_list" in script
+    assert "appStore.m_mapApps" in script
+
+
+def test_refresh_steam_ui_tabs_removed():
+    """La manipolazione del fiber ReactVirtualized è stata rimossa perché corrompeva MobX."""
+    assert not hasattr(steamhook, "refresh_steam_ui_tabs")
+

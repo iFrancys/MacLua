@@ -513,57 +513,18 @@ def get_managed_games(home=None):
     return games
 
 
-def refresh_steam_ui_tabs(tabs=None):
-    """Aggiorna le viste virtualizzate della libreria nei tab UI di Steam."""
-    if tabs is None:
-        try:
-            req = urllib.request.Request(CDP_URL, headers={"User-Agent": "MacLua"})
-            with urllib.request.urlopen(req, timeout=0.8) as resp:
-                tabs = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return
-    for t in tabs:
-        if t.get("title") != "SharedJSContext" and t.get("webSocketDebuggerUrl"):
-            try:
-                c = cdp.CDPClient(t["webSocketDebuggerUrl"], timeout=1)
-                try:
-                    c.evaluate("""(() => {
-                        const listEl = document.querySelector('.ReactVirtualized__List');
-                        if (!listEl) return;
-                        const key = Object.keys(listEl).find(k => k.startsWith('__reactFiber'));
-                        let f = listEl[key];
-                        while (f) {
-                            if (f.stateNode && f.stateNode.m_rgAutorunDisposers) {
-                                const inst = f.stateNode;
-                                const sym = Object.getOwnPropertySymbols(inst).find(s => String(s).includes('mobx administration'));
-                                if (sym && inst[sym]) {
-                                    const adm = inst[sym];
-                                    const valObj = adm.values_?.get ? adm.values_.get('visibleRows') : adm.values_?.['visibleRows'];
-                                    if (valObj && valObj.derivation) {
-                                        valObj.value_ = valObj.derivation.call(valObj.scope_ || inst);
-                                        valObj.dependenciesState_ = 0;
-                                        if (typeof valObj.onBecomeStale_ === 'function') valObj.onBecomeStale_();
-                                        inst.forceUpdate();
-                                        return;
-                                    }
-                                }
-                            }
-                            f = f.return;
-                        }
-                    })()""")
-                finally:
-                    c.close()
-            except Exception:
-                pass
-
-
 def sync_library_in_steam(home=None):
     """Sincronizza in modo pulito e sicuro i giochi gestiti in SharedJSContext di Steam.
     - Riconcilia prima eventuali appmanifest bloccati da aggiornamenti PICS (StateFlags 6 -> 4).
     - Imposta visible_in_game_list = true e subscribed_to = true su appStore per tutti i giochi gestiti.
     - Per i giochi installati, assicura stato pronto (installed: true, display_status: 11 'GIOCA').
     - Per i giochi non installati, assicura stato pulito (installed: false, display_status: 9 'INSTALLA').
-    - Invalida la cache MobX su tutte le collezioni e aggiorna istantaneamente l'interfaccia UI.
+
+    Tutte le modifiche avvengono assegnando normalmente le proprietà osservabili di appStore:
+    MobX notifica automaticamente observer e reazioni, quindi la UI si aggiorna da sola.
+    Non vengono mai toccati i simboli/simboli privati interni di MobX (value_, dependenciesState_,
+    onBecomeStale_) né il fiber di React, perché ciò corrompe il grafo delle dipendenze e fa crashare
+    l'Error Boundary della libreria di Steam.
     """
     home = home or os.path.expanduser("~")
     try:
@@ -598,8 +559,7 @@ def sync_library_in_steam(home=None):
             script = f"""
             (() => {{
                 const appStore = window.appStore;
-                const collStore = window.collectionStore;
-                if (!appStore || !collStore) return JSON.stringify({{ ok: false, error: "Stores non pronti" }});
+                if (!appStore) return JSON.stringify({{ ok: false, error: "Stores non pronti" }});
 
                 const allManaged = {aids_json};
                 const installedSet = new Set({installed_json});
@@ -650,36 +610,6 @@ def sync_library_in_steam(home=None):
                     }}
                 }}
 
-                // Invalida e ricalcola la cache derivata visibleApps per TUTTE le collezioni utente e di sistema
-                try {{
-                    const cs = window.collectionStore;
-                    if (cs) {{
-                        const allCols = [
-                            cs.uncategorizedCollection,
-                            ...(cs.userCollections || []),
-                            ...((cs.collectionsFromStorage && typeof cs.collectionsFromStorage.values === 'function') ? Array.from(cs.collectionsFromStorage.values()) : [])
-                        ];
-                        for (const col of allCols) {{
-                            if (!col) continue;
-                            const syms = Object.getOwnPropertySymbols(col);
-                            for (const sym of syms) {{
-                                const adm = col[sym];
-                                if (!adm || !adm.values_) continue;
-                                for (const prop of ['visibleApps', 'allApps']) {{
-                                    const valObj = adm.values_.get ? adm.values_.get(prop) : adm.values_[prop];
-                                    if (valObj && valObj.derivation) {{
-                                        try {{
-                                            valObj.value_ = valObj.derivation.call(valObj.scope_ || col);
-                                            valObj.dependenciesState_ = 0;
-                                            if (typeof valObj.onBecomeStale_ === 'function') valObj.onBecomeStale_();
-                                        }} catch (e) {{}}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }} catch (e) {{}}
-
                 return JSON.stringify({{
                     ok: true,
                     managedCount: allManaged.length,
@@ -691,11 +621,6 @@ def sync_library_in_steam(home=None):
             res = json.loads(res_str) if res_str else {"ok": False, "error": "Nessuna risposta"}
         finally:
             client.close()
-
-        try:
-            refresh_steam_ui_tabs(tabs)
-        except Exception:
-            pass
 
         return res
     except Exception as e:
