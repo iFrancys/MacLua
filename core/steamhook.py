@@ -560,6 +560,13 @@ def sync_library_in_steam(home=None):
             (() => {{
                 const appStore = window.appStore;
                 if (!appStore) return JSON.stringify({{ ok: false, error: "Stores non pronti" }});
+                // Avvio a freddo: non toccare nulla finché Steam non ha completato la propria
+                // inizializzazione, altrimenti si rischia di avvelenare i computed MobX.
+                if (appStore.m_bIsInitialized !== true || !appStore.m_mapApps) {{
+                    return JSON.stringify({{ ok: false, error: "appStore non ancora inizializzato" }});
+                }}
+                const csRaw = window.collectionStore ? window.collectionStore.m_mapCollectionsFromStorage : null;
+                const collectionsReady = !!(csRaw && typeof csRaw.values === 'function' && csRaw.size > 0);
 
                 const allManaged = {aids_json};
                 const installedSet = new Set({installed_json});
@@ -616,16 +623,23 @@ def sync_library_in_steam(home=None):
                     }}
                 }}
 
-                // Sincronizza le collezioni usando ESCLUSIVAMENTE i metodi pubblici nativi di Steam
-                // (ClearAppCounts + SetApps) senza mai toccare i simboli privati interni di MobX.
+                // Sincronizza SOLO le collezioni utente "Lua" usando i metodi pubblici nativi di Steam
+                // (ClearAppCounts + SetApps), senza mai toccare i simboli privati interni di MobX.
+                //
+                // IMPORTANTE: non leggere MAI i getter computed di collectionStore
+                // (uncategorizedCollection, userCollections, collectionsFromStorage, ...).
+                // Dipendono dal campo NON osservabile m_mapCollectionsFromStorage, che Steam imposta
+                // solo a inizializzazione completata: se vengono calcolati prima (avvio a freddo),
+                // MobX memorizza l'eccezione "reading 'forEach'" nel computed e la libreria resta
+                // rotta ("Something went wrong while displaying this content") fino al riavvio di Steam.
+                // Si legge quindi direttamente la mappa grezza, e solo quando esiste.
                 try {{
                     const cs = window.collectionStore;
-                    if (cs) {{
-                        const allCols = [
-                            cs.uncategorizedCollection,
-                            ...(cs.userCollections || [])
-                        ];
-                        for (const col of allCols) {{
+                    const rawMap = cs ? cs.m_mapCollectionsFromStorage : null;
+                    if (collectionsReady && rawMap && typeof rawMap.values === 'function') {{
+                        const luaCols = Array.from(rawMap.values()).filter(c =>
+                            c && (c.displayName || '').trim().toLowerCase() === 'lua');
+                        for (const col of luaCols) {{
                             if (!col) continue;
                             const isLuaCol = (col.displayName || '').trim().toLowerCase() === 'lua';
                             let addedToLua = false;
@@ -639,15 +653,13 @@ def sync_library_in_steam(home=None):
                                     }}
                                 }}
                             }}
-                            const allLen = col.allApps ? col.allApps.length : 0;
-                            const visLen = col.visibleApps ? col.visibleApps.length : 0;
-                            const countsStale = col.m_mapFilterToAppCounts && col.m_mapFilterToAppCounts.size > 0 &&
-                                Array.from(col.m_mapFilterToAppCounts.values()).some(v => v < visLen || v < allLen);
-                            if (modifiedCount > 0 || addedToLua || visLen < allLen || countsStale) {{
+                            const firstRefresh = !window.__macluaLuaColRefreshed;
+                            if (modifiedCount > 0 || addedToLua || firstRefresh) {{
                                 if (typeof col.ClearAppCounts === 'function') col.ClearAppCounts();
                                 if (typeof col.SetApps === 'function' && col.m_setApps) {{
                                     col.SetApps(Array.from(col.m_setApps));
                                 }}
+                                window.__macluaLuaColRefreshed = true;
                             }}
                         }}
                     }}

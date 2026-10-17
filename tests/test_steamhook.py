@@ -90,6 +90,33 @@ def test_sync_library_script_never_touches_mobx_internals(tmp_path):
     assert "appStore.m_mapApps" in script
 
 
+def test_sync_library_script_never_reads_collectionstore_computeds(tmp_path):
+    """Regressione (crash "reading 'forEach'" / "removeEventListener" nella libreria):
+    all'avvio a freddo leggere collectionStore.uncategorizedCollection/userCollections prima che
+    Steam imposti m_mapCollectionsFromStorage avvelena per sempre il computed MobX.
+    Lo script deve attendere appStore.m_bIsInitialized e usare solo la mappa grezza."""
+    tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
+    captured = {}
+    fake_client = MagicMock()
+
+    def _evaluate(script, *args, **kwargs):
+        captured["script"] = script
+        return json.dumps({"ok": True})
+
+    fake_client.evaluate.side_effect = _evaluate
+    with patch("core.steamhook.get_managed_games", return_value=[{"appid": 123, "installed": False}]), \
+         patch("core.steamhook.urllib.request.urlopen", return_value=_fake_urlopen(tabs)), \
+         patch("core.steamhook.cdp.CDPClient", return_value=fake_client):
+        steamhook.sync_library_in_steam(home=str(tmp_path))
+
+    script = captured["script"]
+    for computed in (".uncategorizedCollection", ".userCollections", ".collectionsFromStorage",
+                     ".allAppsCollection", ".myGamesCollection", ".GetCollection("):
+        assert computed not in script, computed
+    assert "m_bIsInitialized" in script
+    assert "m_mapCollectionsFromStorage" in script
+
+
 def test_refresh_steam_ui_tabs_removed():
     """La manipolazione del fiber ReactVirtualized è stata rimossa perché corrompeva MobX."""
     assert not hasattr(steamhook, "refresh_steam_ui_tabs")
