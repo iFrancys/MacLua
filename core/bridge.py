@@ -323,7 +323,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 # Salva snapshot nel vault
                 vault.snapshot(target_id, fetched["lua"], note="Importazione automatica in-Steam")
 
-                from core import steamhook
                 try:
                     steamhook.broadcast_library_refresh(home)
                 except Exception:
@@ -391,7 +390,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
             from maclua import _ensure
             _ensure(home)
 
-            from core import steamhook
             try:
                 steamhook.remove_from_steam_library(target_id, home)
                 steamhook.broadcast_library_refresh(home)
@@ -654,7 +652,7 @@ def start_continuous_injector_daemon():
                 # 3. Controllo licenze stale del client ogni 5 minuti: se il file
                 #    su disco è corretto ma il client non vede le licenze, riavvia
                 #    Steam da solo (con guardie anti-loop e giochi in esecuzione).
-                if tick % 600 == 0:
+                if tick > 0 and tick % 600 == 0:
                     try:
                         check_stale_client_licenses(home)
                     except Exception:

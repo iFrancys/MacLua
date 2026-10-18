@@ -167,6 +167,14 @@ def restart_steam():
             subprocess.run(["/usr/bin/killall", "-9", "steam_osx"], capture_output=True)
             time.sleep(0.5)
 
+    # Prima di riaprire Steam (mentre è completamente chiuso e non può più
+    # sovrascrivere packageinfo.vdf in chiusura), riallinea licenze e chiavi.
+    try:
+        import maclua
+        maclua._ensure(os.path.expanduser("~"))
+    except Exception:
+        pass
+
     time.sleep(0.5)
     subprocess.Popen(["/usr/bin/open", "-a", "Steam", "--args", "-cef-enable-debugging"])
     return {"ok": True, "restarted": True}
@@ -202,7 +210,7 @@ def client_app_licensed(appid, timeout=2):
         client = cdp.CDPClient(shared_tab["webSocketDebuggerUrl"], timeout=timeout)
         try:
             res = client.evaluate(
-                f"(async () => String(await SteamClient.Apps.GetIsSubscribedApp({int(appid)})))()"
+                f"(async () => {{ if (!window.appStore || window.appStore.m_bIsInitialized !== true) return 'none'; return String(await SteamClient.Apps.GetIsSubscribedApp({int(appid)})); }})()"
             )
             if res == "true":
                 return True
@@ -615,6 +623,30 @@ def sync_library_in_steam(home=None):
                 const allManaged = {aids_json};
                 const installedSet = new Set({installed_json});
                 const uninstalled = new Set({uninstalled_json});
+                window.__macluaManagedSet = new Set(allManaged);
+
+                // Protegge visible_in_game_list e subscribed_to da reset asincroni
+                // causati da UpdateAppOverview -> AppOverview.prototype.InitFromProto
+                try {{
+                    const sampleApp = appStore.m_mapApps.values().next().value;
+                    const appProto = sampleApp ? Object.getPrototypeOf(sampleApp) : null;
+                    if (appProto && typeof appProto.InitFromProto === 'function' && !appProto.InitFromProto.__macluaWrapped) {{
+                        const origInitFromProto = appProto.InitFromProto;
+                        const wrappedInit = function(proto) {{
+                            const res = origInitFromProto.apply(this, arguments);
+                            try {{
+                                if (window.__macluaManagedSet && window.__macluaManagedSet.has(this.appid)) {{
+                                    this.visible_in_game_list = true;
+                                    this.subscribed_to = true;
+                                    this.is_subscribed = true;
+                                }}
+                            }} catch (e) {{}}
+                            return res;
+                        }};
+                        wrappedInit.__macluaWrapped = true;
+                        appProto.InitFromProto = wrappedInit;
+                    }}
+                }} catch (e) {{}}
 
                 let modifiedCount = 0;
                 for (const aid of allManaged) {{
@@ -644,6 +676,15 @@ def sync_library_in_steam(home=None):
                                         modifiedCount++;
                                     }}
                                     const ds = pcd.display_status;
+                                    if (ds === 34) {{
+                                        try {{
+                                            window.__macluaCloudDisabled = window.__macluaCloudDisabled || new Set();
+                                            if (!window.__macluaCloudDisabled.has(aid) && window.SteamClient?.Apps?.ToggleAppSteamCloudEnabled) {{
+                                                window.__macluaCloudDisabled.add(aid);
+                                                window.SteamClient.Apps.ToggleAppSteamCloudEnabled(aid);
+                                            }}
+                                        }} catch (e) {{}}
+                                    }}
                                     if (ds === 9 || ds === 20 || ds === 7 || ds === 6 || ds === 34) {{
                                         pcd.display_status = 11;
                                         modifiedCount++;
@@ -678,12 +719,11 @@ def sync_library_in_steam(home=None):
                 // rotta ("Something went wrong while displaying this content") fino al riavvio di Steam.
                 // Si legge quindi direttamente la mappa grezza, e solo quando esiste.
                 //
-                // Diff-only e idempotente: la collezione deve contenere ESATTAMENTE i giochi gestiti
-                // (meno quelli rimossi manualmente dall'utente). Se è già a posto non si scrive nulla,
-                // così il sync periodico non disturba MobX. Le aggiunte vanno sia in m_setApps
-                // (set vivo usato dalla UI) sia in m_setAddedManually, che Steam conserva quando
-                // ricostruisce le collezioni (UpdateApps). Il membership viene salvato con Save(),
-                // il percorso nativo che persiste la definizione nello storage di Steam.
+                // Oltre al caso di nuove aggiunte (colChanged), se visible_in_game_list dei giochi
+                // non installati è appena stato ripristinato (modifiedCount > 0) o visibleApps / i
+                // conteggi filtrati della collezione sono rimasti indietro rispetto ad allApps
+                // (perché visible_in_game_list non è osservabile in MobX), si ricalcolano SetApps e
+                // ClearAppCounts così la sidebar mostra tutti i giochi Lua (scaricati e non scaricati).
                 let colChanged = false;
                 try {{
                     const cs = window.collectionStore;
@@ -707,14 +747,23 @@ def sync_library_in_steam(home=None):
                                     colChanged = true;
                                 }}
                             }}
-                            if (colChanged) {{
+                            const allLen = col.allApps ? col.allApps.length : 0;
+                            const visLen = col.visibleApps ? col.visibleApps.length : 0;
+                            const countsStale = Boolean(
+                                col.m_mapFilterToAppCounts &&
+                                col.m_mapFilterToAppCounts.size > 0 &&
+                                Array.from(col.m_mapFilterToAppCounts.values()).some(v => v < allLen)
+                            );
+                            if (colChanged || modifiedCount > 0 || visLen < allLen || countsStale) {{
                                 if (typeof col.ClearAppCounts === 'function') col.ClearAppCounts();
                                 if (typeof col.SetApps === 'function') {{
                                     col.SetApps(Array.from(col.m_setApps));
                                 }}
-                                try {{
-                                    if (typeof col.Save === 'function') col.Save();
-                                }} catch (e) {{}}
+                                if (colChanged) {{
+                                    try {{
+                                        if (typeof col.Save === 'function') col.Save();
+                                    }} catch (e) {{}}
+                                }}
                             }}
                         }}
                     }}
@@ -754,6 +803,7 @@ def remove_from_steam_library(appid, home=None):
             client.evaluate(f"""
             (() => {{
                 const aid = {int(appid)};
+                if (window.__macluaManagedSet) window.__macluaManagedSet.delete(aid);
                 const app = window.appStore?.m_mapApps?.get(aid);
                 if (app) app.visible_in_game_list = false;
                 try {{
@@ -958,10 +1008,22 @@ def install_bridge_agent(python_path=None, script_path=None, home=None):
 </dict>
 </plist>
 """
-    with open(plist_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    existing = None
+    if os.path.exists(plist_path):
+        try:
+            with open(plist_path, "r", encoding="utf-8") as f:
+                existing = f.read()
+        except Exception:
+            existing = None
+    if existing != content:
+        atomic_write(plist_path, content)
     import subprocess
-    subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+    # IMPORTANTE: NON chiamare mai "launchctl unload" qui!
+    # Quando install_bridge_agent viene invocato da enable_hook() / restart_steam()
+    # dentro il processo dev.maclua.bridge stesso, "launchctl unload" fa sì che launchd
+    # invii immediatamente SIGTERM al processo bridge, uccidendolo prima che "launchctl load -w"
+    # possa essere eseguito e lasciando il servizio scaricato permanentemente.
+    # "launchctl load -w" carica l'agente se è scaricato ed è un no-op sicuro se è già attivo.
     subprocess.run(["launchctl", "load", "-w", plist_path], capture_output=True)
     return {"ok": True, "path": plist_path}
 

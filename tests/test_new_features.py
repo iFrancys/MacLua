@@ -20,7 +20,10 @@ def test_install_bridge_agent_writes_plist(tmp_path, monkeypatch):
         content = f.read()
     assert "dev.maclua.bridge" in content
     assert "<string>serve</string>" in content
-    assert any(c[0] == "launchctl" for c in calls)
+    assert any(c[:3] == ["launchctl", "load", "-w"] for c in calls)
+    # Regressione: mai chiamare "launchctl unload" dentro install_bridge_agent,
+    # altrimenti il demone bridge uccide se stesso con SIGTERM durante restart_steam().
+    assert not any(c[:2] == ["launchctl", "unload"] for c in calls)
 
 
 def test_settings_get_set(tmp_path, monkeypatch):

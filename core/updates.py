@@ -90,6 +90,7 @@ def check_updates(appid, home=None):
     acf_path = os.path.join(steamapps, f"appmanifest_{appid}.acf")
     depot_status = {"installed": {}, "live": {}, "available": False}
     manifest_ready = True
+    missing_gids = {}
     if os.path.exists(acf_path):
         try:
             with open(acf_path, "r", encoding="utf-8", errors="replace") as f:
@@ -105,6 +106,29 @@ def check_updates(appid, home=None):
                         or os.path.exists(os.path.join(depotcache_dir, f"{dep}_{live_gid}.manifest"))
                     ):
                         manifest_ready = False
+                        missing_gids[int(dep)] = str(live_gid)
+        except Exception:
+            pass
+
+    if has_game_update and not manifest_ready and missing_gids:
+        try:
+            from core import config, settings, source
+            key = config.get_key(home) or settings.get("hubcap_key", "")
+            pref = settings.get("preferred_source", "auto")
+            fetched = source.fetch_from_sources(
+                appid,
+                key=key,
+                preferred_source=pref,
+                auto_update=True,
+                target_gids=missing_gids,
+            )
+            if fetched and fetched.get("manifests"):
+                install.import_lua(appid, fetched["lua"], fetched["manifests"], home)
+            manifest_ready = all(
+                os.path.exists(os.path.join(store_dir, f"{dep}_{gid}.manifest"))
+                or os.path.exists(os.path.join(depotcache_dir, f"{dep}_{gid}.manifest"))
+                for dep, gid in missing_gids.items()
+            )
         except Exception:
             pass
 

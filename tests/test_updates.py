@@ -140,3 +140,37 @@ def test_request_update_returns_immediately(tmp_path):
     with patch("core.updates._apply_locked", return_value={"ok": True}) as apply:
         res = updates.request_update(322170, home=str(tmp_path))
     assert res == {"ok": True, "appid": 322170, "updating": True}
+
+
+def test_check_updates_fetches_missing_manifests_from_sources(tmp_path):
+    """Se PICS indica un aggiornamento ma il manifest target non è ancora su disco,
+    check_updates deve interrogare le sorgenti remote e importare il manifest."""
+    home = str(tmp_path)
+    from core import paths
+    import os
+    steamapps = paths.steamapps(home)
+    store_dir = paths.sls_manifests(home)
+    os.makedirs(steamapps, exist_ok=True)
+    os.makedirs(store_dir, exist_ok=True)
+    with open(os.path.join(steamapps, "appmanifest_322170.acf"), "w") as f:
+        f.write('"AppState"\n{\n\t"appid"\t\t"322170"\n\t"buildid"\t\t"100"\n\t"InstalledDepots"\n\t{\n\t\t"322172"\n\t\t{\n\t\t\t"manifest"\t\t"111"\n\t\t}\n\t}\n}\n')
+
+    def _fake_import(appid, lua_text, manifests, h=None):
+        for fn, data in manifests.items():
+            with open(os.path.join(store_dir, fn), "wb") as mf:
+                mf.write(data)
+
+    with patch("core.updates.ai.public_buildid", return_value=200), \
+         patch("core.updates.ai.depots", return_value=[{"id": 322172, "gid": "222", "oslist": "macos"}]), \
+         patch("core.updates.ai.listofdlc", return_value=[]), \
+         patch("core.source.fetch_from_sources", return_value={
+             "lua": "addappid(322170)\n",
+             "manifests": {"322172_222.manifest": b"FAKE"},
+         }) as fetch_mock, \
+         patch("core.updates.install.import_lua", side_effect=_fake_import):
+        info = updates.check_updates(322170, home=home)
+
+    fetch_mock.assert_called_once()
+    assert info["has_update"] is True
+    assert info["manifest_ready"] is True
+

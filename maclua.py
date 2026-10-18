@@ -155,6 +155,22 @@ def _ensure_locked(home):
     install.cleanup_broken_appmanifests(steamapps_dir)
     install.reconcile_installed_appmanifests(steamapps_dir, home=home)
 
+    # Auto-ripristino del demone bridge se l'hook è abilitato sulla home reale dell'utente
+    try:
+        real_user_home = os.path.realpath(os.path.expanduser("~"))
+        if os.path.realpath(home) == real_user_home:
+            from core import steamhook
+            mf_path = os.path.join(paths.maclua_dir(home), "hook_manifest.json")
+            hook_enabled = os.path.exists(steamhook.bridge_agent_path(home))
+            if os.path.exists(mf_path):
+                with open(mf_path, "r", encoding="utf-8") as mf_f:
+                    mf_data = json.load(mf_f)
+                    hook_enabled = bool(mf_data.get("enabled", True))
+            if hook_enabled:
+                steamhook.install_bridge_agent(home=home)
+    except Exception:
+        pass
+
     return {"apps": sorted(roots), "licensed_apps": sorted(appids), "added": added, "removed": removed,
             "staged": staged, "keys": nkeys}
 

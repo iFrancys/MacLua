@@ -217,3 +217,51 @@ def test_running_managed_appids_conservative_on_pgrep_error(tmp_path):
         assert steamhook.running_managed_appids(home=str(tmp_path)) == [322170]
 
 
+def test_sync_library_refreshes_lua_collection_when_visibility_stale(tmp_path):
+    """Regressione (LUA mostra 3 invece di 11/12):
+    quando i giochi sono già salvati in col.m_setApps e col.m_setAddedManually
+    (colChanged === false), ma visible_in_game_list dei giochi non scaricati
+    viene appena ripristinato (modifiedCount > 0) o col.visibleApps.length < col.allApps.length,
+    sync_library_in_steam deve comunque chiamare ClearAppCounts() e SetApps() e
+    proteggere InitFromProto da futuri reset di visible_in_game_list."""
+    tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
+    captured = {}
+    fake_client = MagicMock()
+
+    def _evaluate(script, *args, **kwargs):
+        captured["script"] = script
+        return json.dumps({"ok": True})
+
+    fake_client.evaluate.side_effect = _evaluate
+    with patch("core.steamhook.get_managed_games", return_value=[
+        {"appid": 322170, "installed": True},
+        {"appid": 504230, "installed": False},
+    ]), \
+         patch("core.steamhook.urllib.request.urlopen", return_value=_fake_urlopen(tabs)), \
+         patch("core.steamhook.cdp.CDPClient", return_value=fake_client):
+        steamhook.sync_library_in_steam(home=str(tmp_path))
+
+    script = captured["script"]
+    assert "colChanged || modifiedCount > 0 || visLen < allLen || countsStale" in script
+    assert "InitFromProto" in script
+    assert "ToggleAppSteamCloudEnabled" in script
+
+
+def test_client_app_licensed_waits_for_appstore_init():
+    """All'avvio a freddo di Steam, se appStore.m_bIsInitialized non è ancora true,
+    client_app_licensed non deve segnalare falsi positivi di licenza assente."""
+    tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
+    captured = {}
+    fake_client = MagicMock()
+
+    def _evaluate(script, *args, **kwargs):
+        captured["script"] = script
+        return "null"
+
+    fake_client.evaluate.side_effect = _evaluate
+    with patch("core.steamhook.urllib.request.urlopen", return_value=_fake_urlopen(tabs)), \
+         patch("core.steamhook.cdp.CDPClient", return_value=fake_client):
+        assert steamhook.client_app_licensed(322170) is None
+    assert "m_bIsInitialized !== true" in captured["script"]
+
+

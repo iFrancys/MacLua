@@ -187,3 +187,35 @@ def test_stale_noop_when_file_incomplete(tmp_path):
         assert bridge.check_stale_client_licenses(home=str(tmp_path)) is False
         restart.assert_not_called()
         notify.assert_not_called()
+
+
+def test_bridge_post_restart_steam_and_cleanup_manifests_no_unbound_local(tmp_path):
+    """Regressione: do_POST non deve mai ridefinire localmente `steamhook`,
+    altrimenti /restart-steam e /cleanup-manifests falliscono con UnboundLocalError."""
+    import io
+    sent = []
+
+    class DummyHandler(bridge.BridgeHandler):
+        def __init__(self, path):
+            self.path = path
+            self.headers = {"Content-Length": "2"}
+            self.rfile = io.BytesIO(b"{}")
+
+        def _verify_auth(self):
+            return True
+
+        def _send_json(self, status, payload):
+            sent.append((status, payload))
+
+    with patch("core.bridge.steamhook.restart_steam", return_value={"ok": True, "restarted": True}):
+        DummyHandler("/restart-steam").do_POST()
+    assert sent[-1] == (200, {"ok": True, "restarted": True})
+
+    with patch("core.bridge.paths.steamapps", return_value=str(tmp_path)), \
+         patch("core.bridge.install.cleanup_broken_appmanifests", return_value=[]), \
+         patch("core.bridge.install.reconcile_installed_appmanifests", return_value=[]), \
+         patch("core.bridge.steamhook.sync_library_in_steam", return_value={"ok": True}):
+        DummyHandler("/cleanup-manifests").do_POST()
+    assert sent[-1][0] == 200
+    assert sent[-1][1]["ok"] is True
+
