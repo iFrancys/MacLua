@@ -5,6 +5,8 @@ File memorizzato in ~/Library/Application Support/MacLua/settings.json.
 import os
 import json
 
+from core.atomic import atomic_write
+
 SETTINGS_DIR = os.path.expanduser("~/Library/Application Support/MacLua")
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 
@@ -25,6 +27,7 @@ DEFAULT_SETTINGS = {
     "low_power_pause_gif": True,
     "preferred_source": "auto",   # "auto", "sushi", "ryuu", "hubcap"
     "hubcap_key": "",
+    "auto_restart_steam": True,   # riavvia Steam da solo quando le licenze del client sono stale
     "donate_keys": False,
 }
 
@@ -75,7 +78,5 @@ def set_val(key, value):
 
 def save_all(settings):
     _ensure_dir()
-    tmp = SETTINGS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, SETTINGS_FILE)
+    atomic_write(SETTINGS_FILE,
+                 json.dumps(settings, indent=2, ensure_ascii=False))

@@ -5,6 +5,8 @@ import os
 import json
 import time
 
+from core.atomic import atomic_write
+
 FIXES_DIR = os.path.expanduser("~/Library/Application Support/MacLua")
 FIXES_FILE = os.path.join(FIXES_DIR, "fixes.json")
 
@@ -27,10 +29,7 @@ def _load():
 
 def _save(data):
     _ensure()
-    tmp = FIXES_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, FIXES_FILE)
+    atomic_write(FIXES_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def record_fix(appid, fix_type, details=None):

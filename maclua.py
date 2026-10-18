@@ -90,7 +90,30 @@ def _managed_sets(home):
 
 
 def _ensure(home):
-    """Licenze+manifest+chiavi per tutto lo stplug-in. Ritorna report."""
+    """Licenze+manifest+chiavi per tutto lo stplug-in, in SINGLE-FLIGHT.
+
+    `ensure` è chiamato in parallelo da più punti (LaunchAgent al login,
+    sentinella del bridge, RPC del client, CLI). Senza serializzazione due
+    esecuzioni concorrenti si pestano i piedi sugli stessi file
+    (packageinfo.vdf, cache chiavi, appmanifest): è la causa nota di
+    "Nessuna licenza" al riavvio di Steam. Il lock inter-processo garantisce
+    che un solo ensure alla volta tocchi i file; gli altri aspettano e
+    riusano l'esito già applicato.
+    """
+    from core.atomic import FileLock
+    lock = FileLock(os.path.join(paths.maclua_dir(home), "ensure.lock"))
+    if not lock.acquire(timeout=20.0):
+        return {"apps": [], "licensed_apps": [], "added": (set(), set()),
+                "removed": (set(), set()), "staged": [], "keys": 0,
+                "concurrent": True}
+    try:
+        return _ensure_locked(home)
+    finally:
+        lock.release()
+
+
+def _ensure_locked(home):
+    """Corpo di `_ensure`, eseguito sotto lock esclusivo."""
     from core import appinfo as ai
     from core import depotkeys, license, manifests
     from core.lua import parse_lua
@@ -493,6 +516,14 @@ def cmd_install(args):
 def cmd_ensure(args, home=None):
     home = home or os.path.expanduser("~")
     rep = _ensure(home)
+    if rep.get("concurrent"):
+        if emit(args, {"apps": [], "staged": [], "keys": 0,
+                       "added": {"appids": [], "depots": []},
+                       "removed": {"appids": [], "depots": []},
+                       "concurrent": True}):
+            return 0
+        print("ensure già in corso in un altro processo MacLua: niente da fare.")
+        return 0
     (added_app, added_dep), (removed_app, removed_dep) = (
         rep["added"], rep["removed"])
     if emit(args, {"apps": rep["apps"], "staged": rep["staged"],

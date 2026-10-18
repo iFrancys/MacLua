@@ -18,6 +18,13 @@ ALLOWED_ORIGINS = {
     "http://localhost:6767"
 }
 
+# Stato in-memory del rimedio "licenze stale": protegge da loop di riavvii di Steam.
+_STALE_RESTART_COOLDOWN = 600.0   # secondi minimi tra due riavvii automatici
+_MAX_STALE_RESTARTS = 2           # riavvii automatici consecutivi prima di fermarsi
+# Sentinelle `None`: 0.0 non è un tempo valido (time.monotonic() a inizio uptime
+# è vicino a zero, es. dopo un boot: il cooldown scatterebbe senza alcun riavvio).
+_STALE_STATE = {"last_restart": None, "consecutive_restarts": 0, "last_notify": None}
+
 
 class BridgeHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
@@ -141,11 +148,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
                                 "appid": appid,
                                 "name": name,
                                 "installed": installed,
+                                "update": updates.get_status(appid, home) if installed else None,
                                 "cover": f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/header.jpg"
                             })
                         except Exception:
                             pass
             return self._send_json(200, {"games": games})
+
+        elif path == "/update-status":
+            home = os.path.expanduser("~")
+            return self._send_json(200, {"ok": True,
+                                         "status": updates.load_status(home)})
 
         elif path == "/api-list":
             return self._send_json(200, {
@@ -342,16 +355,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if not appid:
                 return self._send_json(400, {"error": "Serve appid"})
             home = os.path.expanduser("~")
-
-            def _bg_update():
-                try:
-                    updates.apply_update(appid, home=home)
-                    steamhook.sync_library_in_steam(home)
-                except Exception:
-                    pass
-
-            threading.Thread(target=_bg_update, daemon=True).start()
-            return self._send_json(200, {"ok": True, "appid": int(appid), "updating": True})
+            # Aggiornamento tracciato: l'esito reale finisce in updates.json
+            # (visibile via /update-status), mai più fallimenti silenziosi.
+            try:
+                res = updates.request_update(appid, home=home)
+            except Exception as e:
+                return self._send_json(500, {"error": f"Errore aggiornamento: {e}"})
+            return self._send_json(200, res)
 
         elif path == "/remove":
             appid = data.get("appid")
@@ -505,17 +515,34 @@ def get_game_depots(appid, home=None):
 
 
 def check_stale_client_licenses(home=None):
-    """Rileva licenze "stale" nel client Steam in esecuzione.
+    """Rileva licenze "stale" nel client Steam in esecuzione e RIMEDIA da sola.
 
-    Il client adotta packageinfo.vdf solo a freddo: se il file su disco è corretto
-    ma un gioco gestito e installato non risulta licenziato nel client in esecuzione,
-    il rimedio è riavviare Steam. Invia una notifica macOS e ritorna True."""
+    Il client adotta packageinfo.vdf solo all'avvio: se il file su disco è
+    corretto ma giochi gestiti e installati non risultano licenziati nel client
+    in esecuzione (tipico dopo che MacLua ha ri-patchato le licenze a Steam
+    acceso), l'unico rimedio è riavviare Steam. Qui:
+    - si controllano TUTTI i giochi gestiti+installati (non un solo campione);
+    - se serve, si riavvia Steam automaticamente SOLO quando è sicuro
+      (nessun gioco in esecuzione) e se la setting auto_restart_steam è attiva;
+    - con giochi in esecuzione o dopo troppi tentativi falliti: notifica e stop
+      (mai loop di riavvii).
+
+    Ritorna un dict con l'esito; False quando non c'è nulla da fare.
+    """
     home = home or os.path.expanduser("~")
-    games = steamhook.get_managed_games(home)
-    sample = next((g for g in games if g.get("installed")), None)
-    if not sample:
+    if not steamhook.is_cdp_available(0.1):
         return False
-    if steamhook.client_app_licensed(sample["appid"]) is not False:
+    games = steamhook.get_managed_games(home)
+    installed = [g for g in games if g.get("installed")]
+    if not installed:
+        return False
+
+    stale = []
+    for g in installed[:20]:
+        if steamhook.client_app_licensed(g["appid"]) is False:
+            stale.append(int(g["appid"]))
+    if not stale:
+        _STALE_STATE["consecutive_restarts"] = 0
         return False
 
     pkginfo = os.path.join(paths.appcache(home), "packageinfo.vdf")
@@ -529,12 +556,43 @@ def check_stale_client_licenses(home=None):
         # Il file stesso è incompleto: se ne occupa la sentinella, non l'utente.
         return False
 
+    now = time.monotonic()
+
+    def _notify_throttled(msg):
+        if _STALE_STATE["last_notify"] is None or now - _STALE_STATE["last_notify"] >= 1800:
+            steamhook.notify_macos("MacLua", msg)
+            _STALE_STATE["last_notify"] = now
+
+    if (_STALE_STATE["last_restart"] is not None
+            and now - _STALE_STATE["last_restart"] < _STALE_RESTART_COOLDOWN):
+        return {"stale": stale, "restarted": False, "reason": "cooldown"}
+
+    if _STALE_STATE["consecutive_restarts"] >= _MAX_STALE_RESTARTS:
+        _notify_throttled(
+            "Steam sta usando licenze non aggiornate: riavvialo manualmente "
+            "(pulsante Riavvia Steam nel riquadro MacLua).")
+        return {"stale": stale, "restarted": False, "reason": "limit"}
+
+    running = steamhook.running_managed_appids(home)
+    if running:
+        _notify_throttled(
+            "Hai un gioco aperto e Steam sta usando licenze non aggiornate: "
+            "riavvia Steam appena hai finito di giocare.")
+        return {"stale": stale, "restarted": False, "reason": "game_running"}
+
+    if not settings.get("auto_restart_steam", True):
+        _notify_throttled(
+            "Steam sta usando licenze non aggiornate: riavvialo per far "
+            "partire i giochi (pulsante Riavvia Steam nel riquadro MacLua).")
+        return {"stale": stale, "restarted": False, "reason": "setting_off"}
+
     steamhook.notify_macos(
         "MacLua",
-        "Steam sta usando licenze non aggiornate: riavvialo per far partire i giochi "
-        "(pulsante Riavvia Steam nel riquadro MacLua)."
-    )
-    return True
+        "Licenze Steam non aggiornate: riavvio Steam da solo per applicarle.")
+    steamhook.restart_steam()
+    _STALE_STATE["last_restart"] = now
+    _STALE_STATE["consecutive_restarts"] += 1
+    return {"stale": stale, "restarted": True}
 
 
 def start_continuous_injector_daemon():
@@ -562,7 +620,6 @@ def start_continuous_injector_daemon():
 
         tick = 0
         last_pkginfo_mtime = 0.0
-        last_stale_notify = 0.0
         last_library_sync = 0.0
         pkginfo = os.path.join(paths.appcache(home), "packageinfo.vdf")
 
@@ -594,11 +651,21 @@ def start_continuous_injector_daemon():
                     if res and res.get("ok"):
                         last_library_sync = now
 
-                # 3. Controllo licenze stale con debounce di 30 minuti
-                if tick % 60 == 0 and (now - last_stale_notify) >= 1800:
+                # 3. Controllo licenze stale del client ogni 5 minuti: se il file
+                #    su disco è corretto ma il client non vede le licenze, riavvia
+                #    Steam da solo (con guardie anti-loop e giochi in esecuzione).
+                if tick % 600 == 0:
                     try:
-                        if check_stale_client_licenses(home):
-                            last_stale_notify = now
+                        check_stale_client_licenses(home)
+                    except Exception:
+                        pass
+
+                # 4. Watcher aggiornamenti ogni 10 minuti: applica da solo gli
+                #    aggiornamenti quando i manifest sono disponibili, con retry
+                #    e stato onesto in updates.json.
+                if tick % 1200 == 0:
+                    try:
+                        updates.background_tick(home)
                     except Exception:
                         pass
             except Exception:

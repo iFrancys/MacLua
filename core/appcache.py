@@ -5,6 +5,8 @@ import os
 import json
 import time
 
+from core.atomic import atomic_write
+
 CACHE_DIR = os.path.expanduser("~/Library/Application Support/MacLua/cache")
 CACHE_FILE = os.path.join(CACHE_DIR, "appcache.json")
 DEFAULT_TTL = 7 * 86400  # 7 giorni di validità
@@ -28,10 +30,7 @@ def _load():
 
 def _save(data):
     _ensure()
-    tmp = CACHE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, CACHE_FILE)
+    atomic_write(CACHE_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def get_info(appid):

@@ -5,6 +5,8 @@ copiato. Idempotente a parità di size (i manifest sono immutabili per gid).
 """
 import os
 
+from core.atomic import atomic_write
+
 
 def valid_name(name):
     if not name.endswith(".manifest"):
@@ -34,11 +36,7 @@ def stage_all(src_dir, dst_dir):
                 continue
             with open(src, "rb") as f:
                 data = f.read()
-            tmp = dst + ".tmp.maclua"
-            with open(tmp, "wb") as f:
-                f.write(data)
-            os.rename(tmp, dst)
-            os.chmod(dst, 0o644)
+            atomic_write(dst, data, mode=0o644)
             copied.append(fn)
         except OSError:
             continue

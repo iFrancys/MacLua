@@ -7,6 +7,7 @@ import base64
 import os
 import re
 
+from core.atomic import atomic_write
 from core.lua import parse_lua
 
 _KEY_FILE = re.compile(r"^depotkey_(\d+)\.yaml$")
@@ -60,11 +61,7 @@ def write_cache(cache_dir, appid, depot, keyhex):
                 return path
     except OSError:
         pass
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(body)
-    os.rename(tmp, path)
-    os.chmod(path, 0o600)
+    atomic_write(path, body, mode=0o600)
     return path
 
 
@@ -163,6 +160,11 @@ def sync_config_vdf(config_vdf_path, keys_map):
             existing_keys[depot_id] = key_lower
             injected += 1
 
+    # Nessuna chiave nuova o modificata: non riscrivere config.vdf (evita
+    # inutili corsie preferenziali di race con Steam che lo riscrive all'uscita).
+    if injected == 0:
+        return 0
+
     lines = ['\t\t\t\t"depots"', '\t\t\t\t{']
     for dep_id in sorted(existing_keys.keys()):
         key = existing_keys[dep_id]
@@ -176,11 +178,8 @@ def sync_config_vdf(config_vdf_path, keys_map):
     depots_start = text.rfind('\n', 0, depots_pos) + 1
     new_text = text[:depots_start] + new_depots_block + text[closing_pos + 1:]
 
-    tmp = config_vdf_path + ".tmp.maclua"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(new_text)
-        os.rename(tmp, config_vdf_path)
+        atomic_write(config_vdf_path, new_text)
     except OSError:
         return 0
     return injected

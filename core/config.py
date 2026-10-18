@@ -5,6 +5,8 @@ Precedenza: env MACLUA_HUBCAP_KEY > file. La chiave non passa mai per i log.
 import json
 import os
 
+from core.atomic import atomic_write
+
 
 def config_dir(home=None):
     h = home if home else os.path.expanduser("~")
@@ -23,11 +25,7 @@ def set_key(home, key):
     os.makedirs(d, exist_ok=True)
     os.chmod(d, 0o700)
     path = key_file(home)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"hubcap_key": key}))
-    os.rename(tmp, path)
-    os.chmod(path, 0o600)
+    atomic_write(path, json.dumps({"hubcap_key": key}), mode=0o600)
     return path
 
 

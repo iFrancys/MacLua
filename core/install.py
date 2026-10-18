@@ -4,6 +4,7 @@ import re
 import time
 
 from core import depotkeys, fetch, manifest
+from core.atomic import atomic_write
 from core.fetch import DEFAULT_CDN_BASES
 from core.lua import parse_lua as _parse_lua
 from core.manifests import valid_name as _valid_manifest_name
@@ -18,11 +19,7 @@ def import_lua(appid, lua_text, manifests, home):
     sp = _paths.stplug_in(home)
     os.makedirs(sp, exist_ok=True)
     dst = os.path.join(sp, "%d.lua" % appid)
-    tmp = dst + ".tmp.maclua"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(lua_text)
-    os.rename(tmp, dst)
-    os.chmod(dst, 0o600)
+    atomic_write(dst, lua_text, mode=0o600)
     store = _paths.sls_manifests(home)
     os.makedirs(store, exist_ok=True)
     staged = []
@@ -30,8 +27,7 @@ def import_lua(appid, lua_text, manifests, home):
         base = name.rsplit("/", 1)[-1]
         if not _valid_manifest_name(base):
             continue
-        with open(os.path.join(store, base), "wb") as f:
-            f.write(blob)
+        atomic_write(os.path.join(store, base), blob)
         staged.append(base)
     return {"appid": appid, "lua": dst, "manifests": sorted(staged)}
 
@@ -170,10 +166,7 @@ def write_installed_state(store_dir, appid, buildid, depot_gids):
         "depots": {str(k): str(v) for k, v in (depot_gids or {}).items()},
         "updated_at": int(time.time()),
     }
-    tmp = p + ".tmp.maclua"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-    os.rename(tmp, p)
+    atomic_write(p, json.dumps(payload, indent=2))
     return p
 
 
@@ -428,10 +421,7 @@ def create_appmanifest(steamapps_dir, appid, name, installdir, buildid, owner):
             '\t"UserConfig"\n\t{\n\t\t"language"\t\t"english"\n\t}\n'
             '\t"MountedConfig"\n\t{\n\t}\n}\n'
             % (appid, name, installdir, buildid, owner, buildid))
-    tmp = path + ".tmp.maclua"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(body)
-    os.rename(tmp, path)
+    atomic_write(path, body)
     return path
 
 
@@ -483,10 +473,7 @@ def patch_appmanifest(acf_path, depot_info, size_on_disk, buildid=None):
                   '\t\t\t"size"\t\t"%s"' % dep_size, '\t\t}']
     block.append('\t}')
     lines[start:end] = block
-    tmp = acf_path + ".tmp.maclua"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    os.rename(tmp, acf_path)
+    atomic_write(acf_path, "\n".join(lines))
     return acf_path
 
 

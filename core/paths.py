@@ -34,6 +34,10 @@ def stplug_in(home=None):
     return os.path.join(steam_config(home), "stplug-in")
 
 
+def maclua_dir(home=None):
+    return os.path.join(_home(home), "Library/Application Support/MacLua")
+
+
 def sls_dir(home=None):
     return os.path.join(_home(home), "Library/Application Support/SLSsteam")
 

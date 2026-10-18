@@ -18,6 +18,7 @@ It seamlessly integrates with Steam for Mac via local Chromium Embedded Framewor
   - Inspect depot lists, install states, and trigger in-place updates without ever leaving Steam.
   - Multi-language support (English, Italian, German, Spanish, French).
   - Automatically manages Steam Library entries for managed games.
+  - Keeps the “Lua” Steam collection in sync with managed games using Steam's own collection APIs (diff-only and idempotent: it writes only when something actually changed).
 
 - **⚡ Plug & Play 1-Step Installation**:
   - Automated `install.sh` handles Python dependencies, LaunchAgent configuration, Steam CEF debugging hooks, and installs a global `maclua` terminal command.
@@ -25,10 +26,13 @@ It seamlessly integrates with Steam for Mac via local Chromium Embedded Framewor
 - **🔄 In-Place Delta Updates**:
   - Updates games without requiring full redownloads or uninstallation.
   - Compares existing file chunks using Adler32 verification and downloads only modified delta chunks from the Steam CDN, preserving user save data and configuration.
+  - Every update is **tracked with its real outcome** (`updates.json`, shown in the in-Steam panel): when a new build's manifests are not published on public sources yet, MacLua reports it honestly and retries automatically in the background (30-minute backoff) instead of failing silently.
 
 - **🔐 Non-Destructive Offline Licensing**:
   - Dynamically packages app and depot IDs into local `packageinfo.vdf` using binary KeyValues structures with proper terminator padding and SHA-1 re-hashing.
   - Self-healing `ensure` engine keeps licenses intact across Steam client updates.
+  - **Race-proof by construction**: all state files are written atomically (unique temp file + `fsync` + atomic rename) and `ensure` runs single-flight under an inter-process lock, so concurrent launches (login agent, bridge sentinel, CLI) can never corrupt `packageinfo.vdf` — the historical cause of "No license" in the Steam client.
+  - When the running Steam client holds stale licenses, MacLua **restarts Steam automatically** to apply them — only when no game is running, with a 10-minute cooldown and an anti-loop cap; otherwise it notifies you.
 
 - **📦 Anonymous Steam CDN Chunk Fetcher**:
   - Downloads encrypted content chunks directly from official Steam CDN endpoints.

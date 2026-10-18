@@ -10,6 +10,7 @@ import os
 import struct
 
 from core.bkv import Reader, parse_node, ser_node
+from core.atomic import atomic_write
 
 HEADER = 0x2C
 FORGE_ID = 4000001
@@ -62,11 +63,7 @@ def _write_back(path, header, pkgs, rest):
     hend = HEADER + len(body1)
     h = hashlib.sha1(new[HEADER:hend]).digest()
     new = new[:0x0C] + h + new[0x20:]
-    tmp = path + ".tmp.maclua"
-    with open(tmp, "wb") as f:
-        f.write(new)
-    os.rename(tmp, path)
-    os.chmod(path, 0o755)
+    atomic_write(path, new, mode=0o755)
     return new
 
 
@@ -105,14 +102,9 @@ def _load_state(state_path):
 
 def _save_state(state_path, appids, depotids):
     import json as _json
-    parent = os.path.dirname(state_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    tmp = state_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(_json.dumps({"appids": sorted(appids),
-                             "depotids": sorted(depotids)}))
-    os.rename(tmp, state_path)
+    atomic_write(state_path,
+                 _json.dumps({"appids": sorted(appids),
+                              "depotids": sorted(depotids)}))
 
 
 def sync(path, want_app, want_dep, state_path):
@@ -201,22 +193,26 @@ def _remove_forged(out):
 
 
 def forge(path, appids, depots):
-    """Ricostruisce il package forgiato; con liste vuote lo rimuove e basta."""
+    """Ricostruisce il package forgiato; con liste vuote lo rimuove e basta.
+
+    Idempotente: se il contenuto risultante è identico a quello su disco non
+    riscrive nulla (niente churn su packageinfo.vdf a ogni ensure).
+    Scrittura atomica: Steam non può mai leggere un file a metà.
+    """
     with open(path, "rb") as f:
-        out = f.read()
-    out, _ = _remove_forged(out)
+        orig = f.read()
+    out, removed = _remove_forged(orig)
     appids, depots = sorted(appids), sorted(depots)
-    if not appids:
-        with open(path, "wb") as f:
-            f.write(out)
+    if appids:
+        term = out.rfind(b"\xff\xff\xff\xff")
+        if term < 0:
+            raise ValueError("terminatore packageinfo assente")
+        kv = _build_kv(FORGE_ID, appids, depots)
+        entry = struct.pack("<I", FORGE_ID) + hashlib.sha1(kv).digest() \
+            + _OPAQUE12 + kv
+        out = out[:term] + entry + out[term:]
+    elif not removed:
         return
-    term = out.rfind(b"\xff\xff\xff\xff")
-    if term < 0:
-        raise ValueError("terminatore packageinfo assente")
-    kv = _build_kv(FORGE_ID, appids, depots)
-    entry = struct.pack("<I", FORGE_ID) + hashlib.sha1(kv).digest() \
-        + _OPAQUE12 + kv
-    out = out[:term] + entry + out[term:]
-    with open(path, "wb") as f:
-        f.write(out)
-    os.chmod(path, 0o755)
+    if out == orig:
+        return
+    atomic_write(path, out, mode=0o755)

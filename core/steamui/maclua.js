@@ -105,6 +105,11 @@
       updateGame: "Update",
       updatingGame: "Updating...",
       updatedToast: "✓ In-place update started for {name}!",
+      updateDone: "✓ {name} updated to the latest available version!",
+      updatePending: "Update not yet available on public sources: MacLua will retry automatically.",
+      updateErrorT: "Update failed.",
+      updatePendingBadge: "update pending",
+      updatingBadge: "updating...",
     },
     it: {
       title: "MacLua Impostazioni",
@@ -145,6 +150,11 @@
       updateGame: "Aggiorna",
       updatingGame: "Aggiornamento...",
       updatedToast: "✓ Aggiornamento in-place avviato per {name}!",
+      updateDone: "✓ {name} aggiornato all'ultima versione disponibile!",
+      updatePending: "Aggiornamento non ancora disponibile sulle sorgenti pubbliche: MacLua riprova da sola.",
+      updateErrorT: "Aggiornamento non riuscito.",
+      updatePendingBadge: "aggiornamento in attesa",
+      updatingBadge: "aggiornamento...",
     },
     de: {
       title: "MacLua Einstellungen",
@@ -185,6 +195,11 @@
       updateGame: "Aktualisieren",
       updatingGame: "Aktualisiere...",
       updatedToast: "✓ In-Place-Update gestartet für {name}!",
+      updateDone: "✓ {name} auf die neueste verfügbare Version aktualisiert!",
+      updatePending: "Update noch nicht auf öffentlichen Quellen verfügbar: MacLua versucht es automatisch erneut.",
+      updateErrorT: "Update fehlgeschlagen.",
+      updatePendingBadge: "Update ausstehend",
+      updatingBadge: "Aktualisiere...",
     },
     es: {
       title: "MacLua Ajustes",
@@ -225,6 +240,11 @@
       updateGame: "Actualizar",
       updatingGame: "Actualizando...",
       updatedToast: "✓ ¡Actualización in-place iniciada para {name}!",
+      updateDone: "✓ ¡{name} actualizado a la última versión disponible!",
+      updatePending: "Actualización aún no disponible en fuentes públicas: MacLua lo reintentará automáticamente.",
+      updateErrorT: "Error en la actualización.",
+      updatePendingBadge: "actualización pendiente",
+      updatingBadge: "actualizando...",
     },
     fr: {
       title: "MacLua Paramètres",
@@ -265,6 +285,11 @@
       updateGame: "Mettre à jour",
       updatingGame: "Mise à jour...",
       updatedToast: "✓ Mise à jour in-place démarrée pour {name} !",
+      updateDone: "✓ {name} mis à jour vers la dernière version disponible !",
+      updatePending: "Mise à jour pas encore disponible sur les sources publiques : MacLua réessaiera automatiquement.",
+      updateErrorT: "Échec de la mise à jour.",
+      updatePendingBadge: "mise à jour en attente",
+      updatingBadge: "mise à jour...",
     }
   };
 
@@ -420,6 +445,17 @@
         const installedBadge = g.installed
           ? `<span style="margin-left: 8px; font-size: 10px; color: #22c55e; font-weight: 700;">[${t("installed")}]</span>`
           : "";
+        const up = g.update || null;
+        let updateStatusBadge = "";
+        if (up && up.status === "pending") {
+          const tip = String((up && up.message) || t("updatePending")).replace(/"/g, "'");
+          updateStatusBadge = `<span title="${tip}" style="margin-left: 8px; font-size: 10px; color: #f59e0b; font-weight: 700;">[⬆ ${t("updatePendingBadge")}]</span>`;
+        } else if (up && up.status === "updating") {
+          updateStatusBadge = `<span style="margin-left: 8px; font-size: 10px; color: #38bdf8; font-weight: 700;">[⏳ ${t("updatingBadge")}]</span>`;
+        } else if (up && up.status === "error") {
+          const tip = String((up && up.message) || t("updateErrorT")).replace(/"/g, "'");
+          updateStatusBadge = `<span title="${tip}" style="margin-left: 8px; font-size: 10px; color: #ef4444; font-weight: 700;">[⚠ ${t("updateErrorT")}]</span>`;
+        }
         const updateBtn = g.installed
           ? `<button class="maclua-btn-update" data-aid="${g.appid}">${t("updateGame")}</button>`
           : "";
@@ -428,6 +464,7 @@
             <span class="maclua-game-item-name" title="${g.name}">${g.name}</span>
             <span class="maclua-game-item-id">(${g.appid})</span>
             ${installedBadge}
+            ${updateStatusBadge}
           </div>
           <div style="display: flex; align-items: center;">
             ${updateBtn}
@@ -442,10 +479,53 @@
             uBtn.innerText = t("updatingGame");
             showToast("MacLua", t("updatingGame"));
             const res = await api("/update", "POST", { appid: g.appid });
-            if (res && res.ok) {
-              showToast("MacLua", t("updatedToast", { name: g.name }));
+            if (!res || !res.ok) {
+              uBtn.disabled = false;
+              uBtn.innerText = t("updateGame");
+              showToast("MacLua", (res && res.error) || t("updateErrorT"));
+              return;
             }
-            setTimeout(() => { refreshLibrary(); }, 3000);
+            // Poll dell'esito REALE: niente più toast ottimistici. Mostra
+            // "aggiornato", "in attesa dei manifest" o l'errore vero.
+            // `before` = stato precedente al click: finché la risposta è
+            // identica, il worker non ha ancora scritto il nuovo esito.
+            const before = JSON.stringify(up || null);
+            const started = Date.now();
+            const poll = setInterval(async () => {
+              const st = await api("/update-status");
+              const entry = st && st.status && st.status[String(g.appid)];
+              if (!entry || (JSON.stringify(entry) === before && entry.status !== "updating")) {
+                if (Date.now() - started > 120000) {
+                  clearInterval(poll);
+                  showToast("MacLua", t("updatePending"));
+                  refreshLibrary();
+                }
+                return;
+              }
+              if (entry.status === "ok" && entry.updated_at) {
+                clearInterval(poll);
+                showToast("MacLua", t("updateDone", { name: g.name }));
+                refreshLibrary();
+                return;
+              }
+              if (entry && entry.status === "pending") {
+                clearInterval(poll);
+                showToast("MacLua", t("updatePending"));
+                refreshLibrary();
+                return;
+              }
+              if (entry && entry.status === "error") {
+                clearInterval(poll);
+                showToast("MacLua", t("updateErrorT") + " " + (entry.message || ""));
+                refreshLibrary();
+                return;
+              }
+              if (Date.now() - started > 120000) {
+                clearInterval(poll);
+                showToast("MacLua", t("updatePending"));
+                refreshLibrary();
+              }
+            }, 3000);
           };
         }
         item.querySelector(".maclua-btn-remove").onclick = async (e) => {

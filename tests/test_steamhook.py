@@ -88,6 +88,13 @@ def test_sync_library_script_never_touches_mobx_internals(tmp_path):
     assert "SetApps" in script
     assert "visible_in_game_list" in script
     assert "appStore.m_mapApps" in script
+    # Sincronizzazione collezione "Lua" sui set nativi: le aggiunte vanno sia nel
+    # set vivo (m_setApps) sia in m_setAddedManually, e il membership viene
+    # persistito col metodo nativo Save() — mai con flag custom o scritture dirette.
+    assert "m_setAddedManually" in script
+    assert "m_setRemovedManually" in script
+    assert "col.Save" in script
+    assert "__macluaLuaColRefreshed" not in script
 
 
 def test_sync_library_script_never_reads_collectionstore_computeds(tmp_path):
@@ -120,5 +127,93 @@ def test_sync_library_script_never_reads_collectionstore_computeds(tmp_path):
 def test_refresh_steam_ui_tabs_removed():
     """La manipolazione del fiber ReactVirtualized è stata rimossa perché corrompeva MobX."""
     assert not hasattr(steamhook, "refresh_steam_ui_tabs")
+
+
+def test_remove_from_steam_library_also_cleans_lua_collection(tmp_path):
+    """Rimuovere un gioco da MacLua deve toglierlo anche dalla collezione "Lua"
+    (m_setAddedManually + m_setApps + Save), senza mai aggiungerlo a m_setRemovedManually."""
+    tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
+    captured = {}
+    fake_client = MagicMock()
+
+    def _evaluate(script, *args, **kwargs):
+        captured["script"] = script
+        return "{}"
+
+    fake_client.evaluate.side_effect = _evaluate
+    with patch("core.steamhook.urllib.request.urlopen", return_value=_fake_urlopen(tabs)), \
+         patch("core.steamhook.cdp.CDPClient", return_value=fake_client):
+        steamhook.remove_from_steam_library(322170, home=str(tmp_path))
+
+    script = captured["script"]
+    assert "visible_in_game_list = false" in script
+    assert "m_setAddedManually.delete" in script
+    assert "m_setApps.delete" in script
+    assert "col.Save" in script
+    # Mai marcare come "rimosso manualmente": l'app è fuori da MacLua, non rimossa a mano dall'utente.
+    assert "m_setRemovedManually.add" not in script
+
+
+def test_running_managed_appids_matches_installdir(tmp_path):
+    steamapps = tmp_path / "Library/Application Support/Steam/steamapps"
+    stplug = tmp_path / "Library/Application Support/Steam/config/stplug-in"
+    steamapps.mkdir(parents=True)
+    stplug.mkdir(parents=True)
+    (stplug / "322170.lua").write_text("addappid(322170)")
+    (steamapps / "appmanifest_322170.acf").write_text(
+        '"AppState"\n{\n\t"installdir"\t\t"Geometry Dash"\n}\n')
+    seen = []
+
+    def _run(cmd, **kwargs):
+        seen.append(cmd)
+        r = MagicMock()
+        r.returncode = 0
+        return r
+
+    with patch("subprocess.run", side_effect=_run):
+        assert steamhook.running_managed_appids(home=str(tmp_path)) == [322170]
+    assert seen == [["/usr/bin/pgrep", "-f", "steamapps/common/Geometry Dash"]]
+
+
+def test_running_managed_appids_ignores_games_not_running(tmp_path):
+    steamapps = tmp_path / "Library/Application Support/Steam/steamapps"
+    stplug = tmp_path / "Library/Application Support/Steam/config/stplug-in"
+    steamapps.mkdir(parents=True)
+    stplug.mkdir(parents=True)
+    (stplug / "322170.lua").write_text("addappid(322170)")
+    (steamapps / "appmanifest_322170.acf").write_text(
+        '"AppState"\n{\n\t"installdir"\t\t"Geometry Dash"\n}\n')
+    r = MagicMock()
+    r.returncode = 1
+    with patch("subprocess.run", return_value=r):
+        assert steamhook.running_managed_appids(home=str(tmp_path)) == []
+
+
+def test_running_managed_appids_only_managed(tmp_path):
+    """Gli appmanifest senza un lua gestito da MacLua non vengono considerati."""
+    steamapps = tmp_path / "Library/Application Support/Steam/steamapps"
+    stplug = tmp_path / "Library/Application Support/Steam/config/stplug-in"
+    steamapps.mkdir(parents=True)
+    stplug.mkdir(parents=True)
+    (steamapps / "appmanifest_999.acf").write_text(
+        '"AppState"\n{\n\t"installdir"\t\t"Altro"\n}\n')
+    with patch("subprocess.run") as run:
+        assert steamhook.running_managed_appids(home=str(tmp_path)) == []
+        run.assert_not_called()
+
+
+def test_running_managed_appids_conservative_on_pgrep_error(tmp_path):
+    """Pattern pgrep non interpretabile (returncode >= 2): prudenza, gioco considerato attivo."""
+    steamapps = tmp_path / "Library/Application Support/Steam/steamapps"
+    stplug = tmp_path / "Library/Application Support/Steam/config/stplug-in"
+    steamapps.mkdir(parents=True)
+    stplug.mkdir(parents=True)
+    (stplug / "322170.lua").write_text("addappid(322170)")
+    (steamapps / "appmanifest_322170.acf").write_text(
+        '"AppState"\n{\n\t"installdir"\t\t"Geometry Dash"\n}\n')
+    r = MagicMock()
+    r.returncode = 2
+    with patch("subprocess.run", return_value=r):
+        assert steamhook.running_managed_appids(home=str(tmp_path)) == [322170]
 
 

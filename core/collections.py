@@ -6,6 +6,8 @@ import re
 import json
 import urllib.request
 
+from core.atomic import atomic_write
+
 CACHE_DIR = os.path.expanduser("~/Library/Application Support/MacLua")
 CACHE_FILE = os.path.join(CACHE_DIR, "collections_cache.json")
 
@@ -56,10 +58,7 @@ def _load_cache():
 
 def _save_cache(data):
     _ensure()
-    tmp = CACHE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, CACHE_FILE)
+    atomic_write(CACHE_FILE, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def fetch_collections(sort="popular", timeout=8):

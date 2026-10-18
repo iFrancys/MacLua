@@ -3,11 +3,13 @@ Attiva il debugging CEF (porta 8080) e inietta l'interfaccia MacLua (JS/CSS) nei
 Garantisce la reversibilità totale (disinstallazione pulita con prima/dopo manifest).
 """
 import os
+import re
 import sys
 import json
 import secrets
 import urllib.request
 from core import paths, cdp
+from core.atomic import atomic_write
 
 HOOK_DIR = os.path.expanduser("~/Library/Application Support/MacLua")
 TOKEN_FILE = os.path.join(HOOK_DIR, "bridge_token")
@@ -41,9 +43,7 @@ def get_or_create_token():
             pass
 
     token = secrets.token_hex(32)
-    with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-        f.write(token)
-    os.chmod(TOKEN_FILE, 0o600)
+    atomic_write(TOKEN_FILE, token, mode=0o600)
     return token
 
 
@@ -87,8 +87,7 @@ def enable_hook(home=None):
         "existed_markers": existed_markers,
         "bridge_agent": agent_info.get("path") if agent_info.get("ok") else None,
     }
-    with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
+    atomic_write(MANIFEST_FILE, json.dumps(manifest, indent=2))
 
     return {
         "ok": True,
@@ -130,8 +129,7 @@ def disable_hook(home=None):
 
     manifest["enabled"] = False
     manifest["bridge_agent"] = None
-    with open(MANIFEST_FILE, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
+    atomic_write(MANIFEST_FILE, json.dumps(manifest, indent=2))
 
     return {"ok": True, "removed": removed, "agent_removed": agent_removed}
 
@@ -215,6 +213,55 @@ def client_app_licensed(appid, timeout=2):
             client.close()
     except Exception:
         return None
+
+
+def running_managed_appids(home=None):
+    """AppID dei giochi gestiti con un processo in esecuzione (per non riavviare
+    Steam mentre si gioca).
+
+    Euristica robusta su macOS: il processo del gioco contiene nel proprio
+    command line il path `steamapps/common/<installdir>`. In caso di dubbio
+    (pattern pgrep non valido) si è conservativi e si considera il gioco attivo.
+    """
+    import subprocess
+    home = home or os.path.expanduser("~")
+    steamapps_dir = paths.steamapps(home)
+    stplug = paths.stplug_in(home)
+    running = []
+    try:
+        names = os.listdir(steamapps_dir)
+    except OSError:
+        return running
+    for fn in names:
+        if not (fn.startswith("appmanifest_") and fn.endswith(".acf")):
+            continue
+        try:
+            appid = int(fn[len("appmanifest_"):-len(".acf")])
+        except ValueError:
+            continue
+        if not os.path.exists(os.path.join(stplug, f"{appid}.lua")):
+            continue
+        try:
+            with open(os.path.join(steamapps_dir, fn), encoding="utf-8",
+                      errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        m_dir = re.search(r'"installdir"\s+"([^"]+)"', txt)
+        if not m_dir:
+            continue
+        target = os.path.join("steamapps", "common", m_dir.group(1))
+        try:
+            r = subprocess.run(["/usr/bin/pgrep", "-f", target],
+                               capture_output=True, timeout=5)
+        except Exception:
+            continue
+        if r.returncode == 0:
+            running.append(appid)
+        elif r.returncode not in (0, 1):
+            # Pattern non interpretabile: prudenza, trattalo come attivo.
+            running.append(appid)
+    return running
 
 
 def get_status(home=None):
@@ -383,24 +430,20 @@ def handle_rpc_request(path, method="GET", data=None):
             aid = int(aid)
         except ValueError:
             return {"ok": False, "error": "AppID non valido"}
-        import threading
         from core import updates
+        # Aggiornamento tracciato: l'esito reale finisce in updates.json
+        # (visibile via /update-status), mai più fallimenti silenziosi.
+        try:
+            return updates.request_update(aid, home=home)
+        except Exception as e:
+            return {"ok": False, "error": f"Errore aggiornamento: {e}"}
 
-        def _bg_update():
-            try:
-                res = updates.apply_update(aid, home=home)
-                if isinstance(res, dict) and not res.get("ok", True) and res.get("error"):
-                    notify_macos("MacLua Aggiornamenti", res["error"])
-                else:
-                    sync_library_in_steam(home)
-            except Exception as e:
-                notify_macos("MacLua Aggiornamenti", f"Errore aggiornamento: {e}")
-
-        threading.Thread(target=_bg_update, daemon=True).start()
-        return {"ok": True, "appid": aid, "updating": True}
+    elif path == "/update-status":
+        from core import updates
+        return {"ok": True, "status": updates.load_status(home)}
 
     elif path == "/library":
-        from core import catalog, install, appinfo as ai
+        from core import catalog, install, appinfo as ai, updates
         stplug = paths.stplug_in(home)
         games = []
         if os.path.exists(stplug):
@@ -417,6 +460,7 @@ def handle_rpc_request(path, method="GET", data=None):
                             "appid": aid,
                             "name": name,
                             "installed": installed,
+                            "update": updates.get_status(aid, home) if installed else None,
                             "cover": f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{aid}/header.jpg"
                         })
                     except Exception:
@@ -624,7 +668,7 @@ def sync_library_in_steam(home=None):
                 }}
 
                 // Sincronizza SOLO le collezioni utente "Lua" usando i metodi pubblici nativi di Steam
-                // (ClearAppCounts + SetApps), senza mai toccare i simboli privati interni di MobX.
+                // (ClearAppCounts + SetApps + Save), senza mai toccare i simboli privati interni di MobX.
                 //
                 // IMPORTANTE: non leggere MAI i getter computed di collectionStore
                 // (uncategorizedCollection, userCollections, collectionsFromStorage, ...).
@@ -633,6 +677,14 @@ def sync_library_in_steam(home=None):
                 // MobX memorizza l'eccezione "reading 'forEach'" nel computed e la libreria resta
                 // rotta ("Something went wrong while displaying this content") fino al riavvio di Steam.
                 // Si legge quindi direttamente la mappa grezza, e solo quando esiste.
+                //
+                // Diff-only e idempotente: la collezione deve contenere ESATTAMENTE i giochi gestiti
+                // (meno quelli rimossi manualmente dall'utente). Se è già a posto non si scrive nulla,
+                // così il sync periodico non disturba MobX. Le aggiunte vanno sia in m_setApps
+                // (set vivo usato dalla UI) sia in m_setAddedManually, che Steam conserva quando
+                // ricostruisce le collezioni (UpdateApps). Il membership viene salvato con Save(),
+                // il percorso nativo che persiste la definizione nello storage di Steam.
+                let colChanged = false;
                 try {{
                     const cs = window.collectionStore;
                     const rawMap = cs ? cs.m_mapCollectionsFromStorage : null;
@@ -640,26 +692,29 @@ def sync_library_in_steam(home=None):
                         const luaCols = Array.from(rawMap.values()).filter(c =>
                             c && (c.displayName || '').trim().toLowerCase() === 'lua');
                         for (const col of luaCols) {{
-                            if (!col) continue;
-                            const isLuaCol = (col.displayName || '').trim().toLowerCase() === 'lua';
-                            let addedToLua = false;
-                            if (isLuaCol && col.m_setApps) {{
-                                const removed = col.m_setRemovedManually;
-                                for (const aid of allManaged) {{
-                                    if (appStore.m_mapApps?.has(aid) && !col.m_setApps.has(aid) && !(removed && removed.has(aid))) {{
-                                        col.m_setApps.add(aid);
-                                        if (col.m_setAddedManually) col.m_setAddedManually.add(aid);
-                                        addedToLua = true;
-                                    }}
+                            if (!col || !col.m_setApps) continue;
+                            const removed = col.m_setRemovedManually;
+                            const manuallyAdded = col.m_setAddedManually;
+                            for (const aid of allManaged) {{
+                                if (removed && removed.has(aid)) continue;
+                                if (!appStore.m_mapApps?.has(aid)) continue;
+                                if (!col.m_setApps.has(aid)) {{
+                                    col.m_setApps.add(aid);
+                                    colChanged = true;
+                                }}
+                                if (manuallyAdded && !manuallyAdded.has(aid)) {{
+                                    manuallyAdded.add(aid);
+                                    colChanged = true;
                                 }}
                             }}
-                            const firstRefresh = !window.__macluaLuaColRefreshed;
-                            if (modifiedCount > 0 || addedToLua || firstRefresh) {{
+                            if (colChanged) {{
                                 if (typeof col.ClearAppCounts === 'function') col.ClearAppCounts();
-                                if (typeof col.SetApps === 'function' && col.m_setApps) {{
+                                if (typeof col.SetApps === 'function') {{
                                     col.SetApps(Array.from(col.m_setApps));
                                 }}
-                                window.__macluaLuaColRefreshed = true;
+                                try {{
+                                    if (typeof col.Save === 'function') col.Save();
+                                }} catch (e) {{}}
                             }}
                         }}
                     }}
@@ -668,7 +723,8 @@ def sync_library_in_steam(home=None):
                 return JSON.stringify({{
                     ok: true,
                     managedCount: allManaged.length,
-                    modified: modifiedCount
+                    modified: modifiedCount,
+                    collectionChanged: colChanged
                 }});
             }})()
             """
@@ -700,6 +756,24 @@ def remove_from_steam_library(appid, home=None):
                 const aid = {int(appid)};
                 const app = window.appStore?.m_mapApps?.get(aid);
                 if (app) app.visible_in_game_list = false;
+                try {{
+                    const cs = window.collectionStore;
+                    const rawMap = cs ? cs.m_mapCollectionsFromStorage : null;
+                    if (rawMap && typeof rawMap.values === 'function') {{
+                        for (const col of Array.from(rawMap.values())) {{
+                            if (!col || (col.displayName || '').trim().toLowerCase() !== 'lua') continue;
+                            if (col.m_setAddedManually) col.m_setAddedManually.delete(aid);
+                            if (col.m_setApps && col.m_setApps.has(aid)) {{
+                                col.m_setApps.delete(aid);
+                                if (typeof col.SetApps === 'function') col.SetApps(Array.from(col.m_setApps));
+                                if (typeof col.ClearAppCounts === 'function') col.ClearAppCounts();
+                                try {{
+                                    if (typeof col.Save === 'function') col.Save();
+                                }} catch (e) {{}}
+                            }}
+                        }}
+                    }}
+                }} catch (e) {{}}
             }})()
             """)
         finally:

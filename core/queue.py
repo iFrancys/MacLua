@@ -7,6 +7,7 @@ import json
 import threading
 from collections import deque
 from core import paths, install, config
+from core.atomic import atomic_write
 
 HISTORY_FILE = os.path.expanduser("~/Library/Application Support/MacLua/queue_history.json")
 
@@ -42,11 +43,7 @@ class DownloadQueue:
         return []
 
     def _save_history(self):
-        os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
-        tmp = HISTORY_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.history[-50:], f, indent=2)
-        os.replace(tmp, HISTORY_FILE)
+        atomic_write(HISTORY_FILE, json.dumps(self.history[-50:], indent=2))
 
     def enqueue(self, appid, name=None):
         with self._lock:

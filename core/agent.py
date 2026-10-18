@@ -7,6 +7,8 @@ riapplica a ogni login. Disattivare "Steam → apri al login" evita la race.
 import os
 import plistlib
 
+from core.atomic import atomic_write
+
 LABEL = "com.maclua.ensure"
 
 
@@ -28,10 +30,7 @@ def install(python, maclua_py, launch_agents_dir):
     """Scrive il plist. Ritorna il path. Non carica (serve logout/login)."""
     os.makedirs(launch_agents_dir, exist_ok=True)
     path = agent_path(launch_agents_dir)
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(plist_bytes(python, maclua_py))
-    os.rename(tmp, path)
+    atomic_write(path, plist_bytes(python, maclua_py))
     return path
 
 
