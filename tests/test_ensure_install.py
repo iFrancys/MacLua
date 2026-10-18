@@ -1,6 +1,5 @@
-"""Ensure licenze + helper URL installazione Steam."""
+"""Ensure licenses + Steam install helper URL."""
 import subprocess
-import sys
 
 import maclua
 

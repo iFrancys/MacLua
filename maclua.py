@@ -8,7 +8,6 @@ appmanifest) + public HTTPS. Never processes, never binaries, never CEF.
 import argparse
 import json
 import os
-import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -113,7 +112,6 @@ def _ensure(home):
 
 def _ensure_locked(home):
     """Body of `_ensure`, executed under exclusive lock."""
-    from core import appinfo as ai
     from core import depotkeys, license, manifests
     from core.lua import parse_lua
     sp = paths.stplug_in(home)
@@ -197,7 +195,6 @@ def cmd_search(args):
 
 
 def cmd_add(args):
-    import time
     from core import config, install, source, appinfo as ai, catalog
     home = os.path.expanduser("~")
     target_appid = args.appid
@@ -258,7 +255,7 @@ def cmd_add(args):
         try:
             fetched = source.fetch_from_sources(target_appid, key=key, preferred_source=pref, auto_update=auto_up)
             lua_text, manifests = fetched["lua"], fetched["manifests"]
-        except Exception as e:
+        except Exception:
             if not key:
                 emit(args, {"error": "API key required (Settings)"})
                 print("API key required: maclua config set-key", file=sys.stderr)
@@ -308,7 +305,7 @@ def cmd_update(args):
     except Exception:
         pass
 
-    rep = _ensure(home)
+    _ensure(home)
     prog = {"bytes": 0, "total_bytes": 0, "total_mb": 0.0}
     last_print = [0.0, 0]
 
@@ -411,7 +408,7 @@ def cmd_remove(args):
             m = re.match(r"(\d+)_\d+\.manifest$", fn)
             if m and int(m.group(1)) in depots_of_app:
                 os.remove(os.path.join(d, fn))
-    rep = _ensure(home)
+    _ensure(home)
     if emit(args, {"appid": args.appid, "removed": True}):
         return 0
     print("remove %d: licenses rebuilt without app" % args.appid)

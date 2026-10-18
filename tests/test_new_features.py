@@ -1,12 +1,10 @@
-"""Test per le nuove funzionalità ispirate a LuaTools:
-Settings, NetResilience (DoH), AppCache, Vault, Fixes, Updates, Collections, Queue, Bridge HTTP e SteamHook.
+"""Tests for features inspired by LuaTools:
+Settings, NetResilience (DoH), AppCache, Vault, Fixes, Collections, Queue, and SteamHook.
 """
 import os
-import json
 import subprocess
 import time
-import pytest
-from core import settings, netresil, appcache, vault, fixes, updates, collections as coll_mod, queue, steamhook, bridge
+from core import settings, netresil, appcache, vault, fixes, collections as coll_mod, queue, steamhook
 
 
 def test_install_bridge_agent_writes_plist(tmp_path, monkeypatch):
@@ -75,7 +73,7 @@ def test_vault_snapshots_and_restore(tmp_path, monkeypatch):
 
     rep1 = vault.snapshot(322170, "addappid(322170)\n", note="v1")
     time.sleep(0.01)
-    rep2 = vault.snapshot(322170, "addappid(322170)\naddappid(322171)\n", note="v2")
+    vault.snapshot(322170, "addappid(322170)\naddappid(322171)\n", note="v2")
 
     snaps = vault.list_snapshots(322170)
     assert len(snaps) == 2
@@ -141,17 +139,17 @@ def test_steamhook_enable_disable(tmp_path, monkeypatch):
     monkeypatch.setattr(steamhook, "HOOK_DIR", str(tmp_path / "MacLua"))
     monkeypatch.setattr(steamhook, "MANIFEST_FILE", str(tmp_path / "MacLua" / "hook_manifest.json"))
     monkeypatch.setattr(steamhook, "TOKEN_FILE", str(tmp_path / "MacLua" / "bridge_token"))
-    # Mai parlare con launchd nei test: il label del plist è reale, un unload per path
-    # scaricherebbe il servizio vero dell'utente.
+    # Never communicate with launchd in tests: the plist label is real, an unload by path
+    # would unload the user's actual service.
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
 
     token = steamhook.get_or_create_token()
     assert len(token) >= 32
 
-    en = steamhook.enable_hook()
+    steamhook.enable_hook()
     assert os.path.exists(os.path.join(steam_root, ".cef-enable-remote-debugging"))
 
-    dis = steamhook.disable_hook()
+    steamhook.disable_hook()
     assert not os.path.exists(os.path.join(steam_root, ".cef-enable-remote-debugging"))
 
 

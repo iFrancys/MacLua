@@ -1,7 +1,7 @@
 """Sync with prune: adds managed, removes unmanaged entries."""
 import json
 
-from core.license import sync, check, FORGE_ID
+from core.license import sync, check
 from tests.test_license import _pkg0, _write
 
 

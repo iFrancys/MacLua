@@ -6,7 +6,6 @@
   untouched so PICS doesn't see updates. Fully idempotent.
 """
 import hashlib
-import os
 import struct
 
 from core.bkv import Reader, parse_node, ser_node

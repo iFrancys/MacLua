@@ -56,7 +56,6 @@ def test_poison_injects_and_rehashes(tmp_path):
 
 
 def _body1(pkgs):
-    from io import BytesIO  # noqa
     body = bytearray()
     for n in pkgs:
         ser_node(n, body)

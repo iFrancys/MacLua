@@ -1,5 +1,4 @@
-"""Fetch chunk e assemblaggio file contro server HTTP locali."""
-import hashlib
+"""Chunk fetch and file assembly against local HTTP test servers."""
 import io
 import threading
 import zipfile
@@ -76,7 +75,6 @@ def _zip_cipher(plain, key):
 
 
 def _entry(plain, key):
-    from Crypto.Cipher import AES  # noqa: F401  (dipendenza esplicita)
     import hashlib as _h
     cipher = _zip_cipher(plain, key)
     return {

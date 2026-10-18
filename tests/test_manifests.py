@@ -1,6 +1,4 @@
-"""Staging manifest SLS -> depotcache di Steam (manca solo copia)."""
-import os
-
+"""Staging manifests: SLS -> Steam depotcache."""
 from core.manifests import stage_all
 
 

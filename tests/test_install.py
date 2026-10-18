@@ -1,4 +1,4 @@
-"""Installazione: selezione depot macOS, fetch, adopt in Steam, verify."""
+"""Installation: macOS depot selection, fetch, adopt into Steam, verify."""
 import io
 import threading
 import zipfile
@@ -89,7 +89,6 @@ def _cipher(plain, key):
 
 def _setup_app(tmp_path, server):
     from Crypto.Random import get_random_bytes
-    import base64
     key = get_random_bytes(32)
     plain = b"demo data " * 100
     cipher = _cipher(plain, key)
@@ -108,7 +107,6 @@ def _setup_app(tmp_path, server):
 def test_fetch_app_end_to_end(server, tmp_path, monkeypatch):
     import core.install as I
     from Crypto.Random import get_random_bytes
-    import base64
     import hashlib
     key = get_random_bytes(32)
     plain = b"demo data " * 100

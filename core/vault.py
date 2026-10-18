@@ -59,7 +59,6 @@ def list_snapshots(appid=None):
     for ad in app_dirs:
         if not os.path.isdir(ad):
             continue
-        cur_appid = int(os.path.basename(ad)) if os.path.basename(ad).isdigit() else 0
         for f in sorted(os.listdir(ad), reverse=True):
             if f.endswith(".json"):
                 try:

@@ -6,7 +6,7 @@ import time
 import json
 import threading
 from collections import deque
-from core import paths, install, config
+from core import paths, install
 from core.atomic import atomic_write
 
 HISTORY_FILE = os.path.expanduser("~/Library/Application Support/MacLua/queue_history.json")

@@ -94,7 +94,7 @@ def fetch_collections(sort="popular", timeout=8):
         if collections:
             _save_cache(collections)
             return {"collections": collections, "cached": False, "stale": False}
-    except Exception as e:
+    except Exception:
         pass
 
     # Offline fallback

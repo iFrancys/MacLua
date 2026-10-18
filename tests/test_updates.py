@@ -137,7 +137,7 @@ def test_apply_locked_records_success(tmp_path):
 
 
 def test_request_update_returns_immediately(tmp_path):
-    with patch("core.updates._apply_locked", return_value={"ok": True}) as apply:
+    with patch("core.updates._apply_locked", return_value={"ok": True}):
         res = updates.request_update(322170, home=str(tmp_path))
     assert res == {"ok": True, "appid": 322170, "updating": True}
 

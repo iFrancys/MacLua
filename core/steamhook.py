@@ -7,6 +7,7 @@ import re
 import sys
 import json
 import secrets
+import time
 import urllib.request
 from core import paths, cdp
 from core.atomic import atomic_write
@@ -72,7 +73,7 @@ def enable_hook(home=None):
                 existed_markers.append(marker)
             else:
                 try:
-                    with open(marker, "w") as f:
+                    with open(marker, "w"):
                         pass
                     created_markers.append(marker)
                 except OSError:
