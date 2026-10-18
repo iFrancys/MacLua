@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""MacLua: gestione giochi Steam su macOS senza hook nel client.
+"""MacLua: Steam game manager for macOS without client hooks.
 
-Comandi: search/add/update/verify/remove/status/doctor.
-Tocca solo file dati di Steam (packageinfo, depotcache, stplug-in,
-appmanifest) + HTTPS pubbliche. Mai processi, mai binari, mai CEF.
+Commands: search/add/update/verify/remove/status/doctor.
+Only touches Steam data files (packageinfo, depotcache, stplug-in,
+appmanifest) + public HTTPS. Never processes, never binaries, never CEF.
 """
 import argparse
 import json
@@ -17,7 +17,7 @@ from core import paths  # noqa: E402
 
 
 def emit(args, obj):
-    """Se --json, stampa l'oggetto e ritorna True (il chiamante salta l'umano)."""
+    """If --json, prints the object and returns True (caller skips human output)."""
     if getattr(args, "json", False):
         print(json.dumps(obj, ensure_ascii=False))
         return True
@@ -25,7 +25,7 @@ def emit(args, obj):
 
 
 def _root_games(home):
-    """Set di AppID dei soli giochi base gestiti (da stplug-in/<appid>.lua). Esclude rigorosamente i DLC."""
+    """Set of AppIDs for managed base games only (from stplug-in/<appid>.lua). Strictly excludes DLCs."""
     sp = paths.stplug_in(home)
     root = set()
     try:
@@ -47,7 +47,7 @@ def _root_games(home):
 
 
 def _managed_sets(home):
-    """(appids, depotids) dall'intero stplug-in + appinfo reale."""
+    """(appids, depots) from the entire stplug-in + actual appinfo."""
     from core import appinfo as ai
     from core.lua import parse_lua
     sp = paths.stplug_in(home)
@@ -90,15 +90,14 @@ def _managed_sets(home):
 
 
 def _ensure(home):
-    """Licenze+manifest+chiavi per tutto lo stplug-in, in SINGLE-FLIGHT.
+    """Licenses + manifests + keys for all stplug-in entries, in SINGLE-FLIGHT.
 
-    `ensure` è chiamato in parallelo da più punti (LaunchAgent al login,
-    sentinella del bridge, RPC del client, CLI). Senza serializzazione due
-    esecuzioni concorrenti si pestano i piedi sugli stessi file
-    (packageinfo.vdf, cache chiavi, appmanifest): è la causa nota di
-    "Nessuna licenza" al riavvio di Steam. Il lock inter-processo garantisce
-    che un solo ensure alla volta tocchi i file; gli altri aspettano e
-    riusano l'esito già applicato.
+    `ensure` is called concurrently from multiple entry points (LaunchAgent at login,
+    bridge watchdog, client RPC, CLI). Without serialization, two concurrent
+    executions will collide on the same files (packageinfo.vdf, key cache, appmanifest):
+    this is the known cause of 'No licenses' when restarting Steam.
+    The inter-process lock guarantees that only one ensure touches the files at a time;
+    others wait and reuse the already applied state.
     """
     from core.atomic import FileLock
     lock = FileLock(os.path.join(paths.maclua_dir(home), "ensure.lock"))
@@ -113,7 +112,7 @@ def _ensure(home):
 
 
 def _ensure_locked(home):
-    """Corpo di `_ensure`, eseguito sotto lock esclusivo."""
+    """Body of `_ensure`, executed under exclusive lock."""
     from core import appinfo as ai
     from core import depotkeys, license, manifests
     from core.lua import parse_lua
@@ -149,13 +148,13 @@ def _ensure_locked(home):
     all_keys = depotkeys.collect_keys(sp)
     depotkeys.sync_config_vdf(os.path.join(paths.steam_config(home), "config.vdf"), all_keys)
 
-    # Pulisce eventuali appmanifest fantasma (StateFlags 2/18 con size 0) e riconcilia i giochi installati
+    # Clean up any phantom appmanifests (StateFlags 2/18 with size 0) and reconcile installed games
     from core import install
     steamapps_dir = paths.steamapps(home)
     install.cleanup_broken_appmanifests(steamapps_dir)
     install.reconcile_installed_appmanifests(steamapps_dir, home=home)
 
-    # Auto-ripristino del demone bridge se l'hook è abilitato sulla home reale dell'utente
+    # Auto-restore bridge daemon if hook is enabled on real user home
     try:
         real_user_home = os.path.realpath(os.path.expanduser("~"))
         if os.path.realpath(home) == real_user_home:
@@ -220,7 +219,7 @@ def cmd_add(args):
         pref = settings.get("preferred_source", "auto")
         auto_up = settings.get("auto_update_apps", True)
 
-        # Verifica se l'AppID richiesto è un DLC di un gioco base
+        # Check if requested AppID is a DLC for a base game
         try:
             parent_id = ai.parent(args.appid)
             if parent_id is None:
@@ -232,14 +231,14 @@ def cmd_add(args):
             is_dlc = True
             parent_lua = os.path.join(paths.stplug_in(home), "%d.lua" % parent_id)
             if os.path.exists(parent_lua):
-                # Il gioco base è già gestito: aggiorna il lua dal remote per recuperare manifest/chiavi del DLC
+                # Base game is already managed: update lua from remote to fetch DLC manifests/keys
                 try:
                     f_parent = source.fetch_from_sources(parent_id, key=key, preferred_source=pref, auto_update=auto_up)
                     install.import_lua(parent_id, f_parent["lua"], f_parent["manifests"], home)
                 except Exception:
                     pass
                 ens = _ensure(home)
-                msg = "Gioco base %d sincronizzato con tutti i DLC inclusi." % parent_id
+                msg = "Base game %d synced with all included DLCs." % parent_id
                 if emit(args, {"appid": args.appid, "parent_appid": parent_id, "dlc": True,
                                "already_managed": True, "apps": ens["apps"],
                                "staged": ens["staged"], "keys": ens["keys"], "message": msg}):
@@ -247,40 +246,40 @@ def cmd_add(args):
                 print(msg)
                 return 0
             else:
-                # Il gioco base non è presente: aggiunge il gioco base che include automaticamente il DLC
+                # Base game is not present: add base game which automatically includes DLC
                 target_appid = parent_id
 
         quiet = getattr(args, "json", False)
         if not quiet:
             if is_dlc:
-                print("AppID %d è un DLC di %d: scarico gioco base e relativi DLC..." % (args.appid, target_appid))
+                print("AppID %d is a DLC of %d: downloading base game and associated DLCs..." % (args.appid, target_appid))
             else:
-                print("scarico lua per %d dalla sorgente..." % target_appid)
+                print("downloading lua for %d from source..." % target_appid)
         try:
             fetched = source.fetch_from_sources(target_appid, key=key, preferred_source=pref, auto_update=auto_up)
             lua_text, manifests = fetched["lua"], fetched["manifests"]
         except Exception as e:
             if not key:
-                emit(args, {"error": "serve una chiave API (Impostazioni)"})
-                print("serve una chiave API: maclua config set-key", file=sys.stderr)
+                emit(args, {"error": "API key required (Settings)"})
+                print("API key required: maclua config set-key", file=sys.stderr)
                 return 2
             raise
         if not quiet:
-            print("lua ok + %d manifest (%s)" % (len(manifests), fetched.get("source", "Multi-Source")))
+            print("lua ok + %d manifests (%s)" % (len(manifests), fetched.get("source", "Multi-Source")))
 
     rep = install.import_lua(target_appid, lua_text, manifests, home)
     ens = _ensure(home)
-    msg = ("Aggiunto gioco base %d con tutti i DLC inclusi." % target_appid) if is_dlc else ("Importato %d." % target_appid)
+    msg = ("Added base game %d with all included DLCs." % target_appid) if is_dlc else ("Imported %d." % target_appid)
     if emit(args, {"appid": args.appid, "target_appid": target_appid,
                    "parent_appid": parent_id if is_dlc else None,
                    "dlc": is_dlc, "lua": rep["lua"],
                    "manifests": rep["manifests"], "apps": ens["apps"],
                    "staged": ens["staged"], "keys": ens["keys"], "message": msg}):
         return 0
-    print("importato %s + %d manifest" % (rep["lua"], len(rep["manifests"])))
-    print("add %d: licenze ok, %d manifest staged, %d chiavi"
+    print("imported %s + %d manifests" % (rep["lua"], len(rep["manifests"])))
+    print("add %d: licenses ok, %d manifests staged, %d keys"
           % (target_appid, len(ens["staged"]), ens["keys"]))
-    print("Ora premi Installa in Steam (crea l'appmanifest), poi:")
+    print("Now click Install in Steam (creates appmanifest), then run:")
     print("  maclua update %d" % target_appid)
     return 0
 
@@ -290,7 +289,7 @@ def cmd_update(args):
     from core import appinfo as ai, config, install, settings, source
     home = os.path.expanduser("~")
 
-    # Scarica sempre eventuali nuovi manifest/lua dalle sorgenti (anche gratuite: Sushi, Ryuu, GitHub mirror)
+    # Always fetch any new manifests/lua from sources (including free: Sushi, Ryuu, GitHub mirror)
     key = config.get_key(home) or settings.get("hubcap_key", "")
     pref = settings.get("preferred_source", "auto")
     try:
@@ -316,7 +315,7 @@ def cmd_update(args):
     def progress(n):
         prog["bytes"] += n
         now = time.time()
-        # Throttling se non completato: emetti al massimo ogni 0.1s o ogni 512KB
+        # Throttling if not completed: emit at most every 0.1s or every 512KB
         if (now - last_print[0] < 0.1) and (prog["bytes"] - last_print[1] < 512 * 1024):
             return
         last_print[0] = now
@@ -357,11 +356,11 @@ def cmd_update(args):
                           "files": out["files"], "bytes": out["bytes"],
                           "out": out["out"]}, ensure_ascii=False))
         return 0
-    print("\nupdate %d: %d depot, %d file, %.1f MB -> %s"
+    print("\nupdate %d: %d depots, %d files, %.1f MB -> %s"
           % (args.appid, len(out["depots"]), out["files"],
              out["bytes"] / 1e6, out["out"]))
     if not args.dry_run:
-        print("Riavvia Steam (o verifica integrità) e premi Gioca.")
+        print("Restart Steam (or verify file integrity) and click Play.")
     return 0
 
 
@@ -373,14 +372,14 @@ def cmd_verify(args):
                              store_dir=paths.sls_manifests(home),
                              depotcache_dir=paths.depotcache(home))
     if emit(args, {"appid": args.appid, "bad": bad}):
-        # JSON: i file anomali sono un dato, non un fallimento del comando.
+        # JSON: mismatched files are data, not a command failure.
         return 0
     if bad:
-        print("%d file anomali:" % len(bad))
+        print("%d mismatched files:" % len(bad))
         for rel in bad[:20]:
             print("  " + rel)
         return 1
-    print("verify %d: tutto integro" % args.appid)
+    print("verify %d: all files verified" % args.appid)
     return 0
 
 
@@ -394,10 +393,10 @@ def cmd_remove(args):
             depots_of_app = set(parse_lua(f.read())["keys"])
     except OSError:
         depots_of_app = set()
-        print("nessun lua per %d" % args.appid)
+        print("no lua found for %d" % args.appid)
     try:
         os.remove(lua)
-        print("rimosso %s" % lua)
+        print("removed %s" % lua)
     except OSError:
         pass
     for fn in os.listdir(paths.sls_cache(home)) if os.path.isdir(
@@ -415,8 +414,8 @@ def cmd_remove(args):
     rep = _ensure(home)
     if emit(args, {"appid": args.appid, "removed": True}):
         return 0
-    print("remove %d: licenze ricostruite senza l'app" % args.appid)
-    print("(package0 conserva eventuali voci storiche: innocue, non listate)")
+    print("remove %d: licenses rebuilt without app" % args.appid)
+    print("(package0 preserves historical entries: harmless, unlisted)")
     return 0
 
 
@@ -428,7 +427,7 @@ def cmd_status(args):
         if args.appid not in appids:
             if emit(args, {"appid": args.appid, "managed": False}):
                 return 0
-            print("%d: non gestito (manca %d.lua)" % (args.appid, args.appid))
+            print("%d: not managed (missing %d.lua)" % (args.appid, args.appid))
             return 1
         from core import appinfo as ai
         try:
@@ -445,9 +444,9 @@ def cmd_status(args):
                 info["versions"] = _ins.update_check(f.read(), ds)
         if emit(args, info):
             return 0
-        print("%d: gestito, %d depot in appinfo, appmanifest: %s"
+        print("%d: managed, %d depots in appinfo, appmanifest: %s"
               % (args.appid, len(ds),
-                 "presente" if info["has_appmanifest"] else "assente (premi Installa)"))
+                 "present" if info["has_appmanifest"] else "missing (click Install)"))
         return 0
     roots = _root_games(home)
     appids, depots = _managed_sets(home)
@@ -455,26 +454,26 @@ def cmd_status(args):
     try:
         m_app, m_dep = license.check(pkginfo, appids, depots)
     except (OSError, ValueError) as e:
-        # Schema completo anche qui: la GUI decodifica sempre la stessa forma.
+        # Full schema here too: GUI always parses the same format.
         if emit(args, {"apps": sorted(roots), "depots": len(depots),
                        "ok": False, "error": str(e),
                        "missing": {"appids": [], "depots": []}}):
             return 0
-        print("packageinfo illeggibile: %s" % e)
+        print("unreadable packageinfo: %s" % e)
         return 1
     if emit(args, {"apps": sorted(roots),
                    "depots": len(depots),
                    "ok": not (m_app or m_dep),
                    "missing": {"appids": sorted(m_app),
                                "depots": sorted(m_dep)}}):
-        # JSON: licenze mancanti = stato (ok=false), non errore del comando.
+        # JSON: missing licenses = status (ok=false), not command error.
         return 0
-    print("%d app gestite, %d depot" % (len(roots), len(depots)))
+    print("%d managed apps, %d depots" % (len(roots), len(depots)))
     if m_app or m_dep:
-        print("mancanti in package0: app=%s depot=%s"
+        print("missing in package0: app=%s depot=%s"
               % (sorted(m_app), sorted(m_dep)))
         return 1
-    print("licenze ok")
+    print("licenses ok")
     return 0
 
 
@@ -484,7 +483,7 @@ def cmd_config(args):
     if args.action == "set-key":
         key = args.value
         if key == "-":
-            # Da stdin: la GUI non la espone in argv (visibile con `ps`).
+            # From stdin: GUI does not expose it in argv (visible via `ps`).
             key = sys.stdin.readline()
         elif not key:
             import getpass
@@ -492,13 +491,13 @@ def cmd_config(args):
         config.set_key(home, key)
         if emit(args, {"has_key": True}):
             return 0
-        print("chiave salvata (0600, mai nei log)")
+        print("key saved (0600 permissions, never logged)")
         return 0
     if args.action == "clear-key":
         removed = config.clear_key(home)
         if emit(args, {"has_key": False, "removed": removed}):
             return 0
-        print("chiave rimossa" if removed else "nessuna chiave salvata")
+        print("key removed" if removed else "no key saved")
         return 0
     cur = config.get_key(home)
     if emit(args, {"has_key": bool(cur),
@@ -506,11 +505,11 @@ def cmd_config(args):
                               else "file") if cur else None}):
         return 0
     if cur:
-        print("chiave: %s...%s (da %s)" % (
+        print("key: %s...%s (from %s)" % (
             cur[:3], cur[-2:],
             "env MACLUA_HUBCAP_KEY" if os.getenv("MACLUA_HUBCAP_KEY") else "file"))
     else:
-        print("nessuna chiave (maclua config set-key)")
+        print("no key configured (maclua config set-key)")
         return 1
     return 0
 
@@ -524,7 +523,7 @@ def cmd_install(args):
     url = steam_url(args.appid)
     if emit(args, {"appid": args.appid, "url": url}):
         return 0
-    print("apro %s (dialogo Installa di Steam)" % url)
+    print("opening %s (Steam Install dialog)" % url)
     subprocess.run(["open", url], check=False)
     return 0
 
@@ -538,7 +537,7 @@ def cmd_ensure(args, home=None):
                        "removed": {"appids": [], "depots": []},
                        "concurrent": True}):
             return 0
-        print("ensure già in corso in un altro processo MacLua: niente da fare.")
+        print("ensure already in progress in another MacLua process: nothing to do.")
         return 0
     (added_app, added_dep), (removed_app, removed_dep) = (
         rep["added"], rep["removed"])
@@ -549,10 +548,10 @@ def cmd_ensure(args, home=None):
                    "removed": {"appids": sorted(removed_app),
                                "depots": sorted(removed_dep)}}):
         return 0
-    print("ensure: %d app, %d manifest staged, %d chiavi; aggiunti=%s rimossi=%s"
+    print("ensure: %d apps, %d manifests staged, %d keys; added=%s removed=%s"
           % (len(rep["apps"]), len(rep["staged"]), rep["keys"],
              rep["added"], rep["removed"]))
-    print("Riavvia Steam per caricare le licenze.")
+    print("Restart Steam to reload licenses.")
     return 0
 
 
@@ -564,21 +563,21 @@ def cmd_agent(args):
         path = agent.install(sys.executable, os.path.abspath(__file__), lad)
         if emit(args, {"installed": True, "path": path}):
             return 0
-        print("agent installato: %s" % path)
-        print("Eseguilo ora? verrà caricato al prossimo login.")
-        print("Per caricarlo subito: launchctl bootstrap gui/$(id -u) %s" % path)
-        print("NOTA: disattiva 'Steam -> apri al login' per evitare la race.")
+        print("agent installed: %s" % path)
+        print("Will be loaded on next login.")
+        print("To load immediately: launchctl bootstrap gui/$(id -u) %s" % path)
+        print("NOTE: disable 'Steam -> Open at Login' to prevent race conditions.")
         return 0
     if args.action == "remove":
         removed = agent.remove(lad)
         if emit(args, {"installed": False, "removed": removed}):
             return 0
-        print("agent rimosso" if removed else "agent non presente")
+        print("agent removed" if removed else "agent not present")
         return 0
     on = agent.installed(lad)
     if emit(args, {"installed": on}):
         return 0
-    print("agent: %s" % ("attivo" if on else "non installato"))
+    print("agent: %s" % ("active" if on else "not installed"))
     return 0
 
 
@@ -597,7 +596,7 @@ def cmd_doctor(args):
                      ("stplug-in", paths.stplug_in(home)),
                      ("sls", paths.sls_dir(home))):
         exists = os.path.isdir(p)
-        check(label, exists, p if exists else "manca: " + p)
+        check(label, exists, p if exists else "missing: " + p)
     for mod in ("Crypto.Cipher", "zstandard"):
         try:
             __import__(mod)
@@ -609,14 +608,14 @@ def cmd_doctor(args):
     try:
         from core import license
         license.load_groups(pkginfo)
-        check("packageinfo", True, "leggibile")
+        check("packageinfo", True, "readable")
     except (OSError, ValueError) as e:
         check("packageinfo", False, str(e))
     ok = all(c["ok"] for c in checks)
     if emit(args, {"ok": ok, "checks": checks}):
         return 0
     for c in checks:
-        print("%s: %s %s" % (c["name"], "ok" if c["ok"] else "MANCA",
+        print("%s: %s %s" % (c["name"], "ok" if c["ok"] else "MISSING",
                              c["detail"]))
     return 0 if ok else 1
 
@@ -632,7 +631,7 @@ def cmd_bridge(args):
     elif args.action == "serve":
         port = getattr(args, "port", 6767) or 6767
         if not getattr(args, "json", False):
-            print(f"Avvio bridge MacLua su http://127.0.0.1:{port}/...")
+            print(f"Starting MacLua bridge on http://127.0.0.1:{port}/...")
         bridge.run_bridge_server(port=port)
         return 0
     return 1
@@ -645,33 +644,33 @@ def cmd_steam_hook(args):
         rep = steamhook.enable_hook(home)
         if emit(args, rep):
             return 0
-        print("Hook Steam abilitato (.cef-enable-remote-debugging creato).")
+        print("Steam hook enabled (.cef-enable-remote-debugging created).")
         return 0
     elif args.action == "disable":
         rep = steamhook.disable_hook(home)
         if emit(args, rep):
             return 0
-        print("Hook Steam disabilitato e file puliti.")
+        print("Steam hook disabled and cleaned up.")
         return 0
     elif args.action == "status":
         rep = steamhook.get_status(home)
         if emit(args, rep):
             return 0
-        print("Marker presente:", rep["marker_present"])
-        print("CDP attivo:", rep["cdp_available"])
-        print("Tab trovati:", rep["tabs_count"])
+        print("Marker present:", rep["marker_present"])
+        print("CDP active:", rep["cdp_available"])
+        print("Tabs found:", rep["tabs_count"])
         return 0
     elif args.action == "inject":
         rep = steamhook.inject_into_tabs()
         if emit(args, rep):
             return 0
-        print("Iniezione completata. Tab aggiornati:", rep.get("injected_count", 0))
+        print("Injection completed. Tabs updated:", rep.get("injected_count", 0))
         return 0
     elif args.action == "restart":
         rep = steamhook.restart_steam()
         if emit(args, rep):
             return 0
-        print("Steam riavviato con porta di debug CEF attiva.")
+        print("Steam restarted with CEF debug port enabled.")
         return 0
     return 1
 
@@ -684,14 +683,14 @@ def cmd_collections(args):
         if emit(args, rep):
             return 0
         for c in rep.get("collections", []):
-            print(f"[{c['id']}] {c['title']} ({c['appCount']} giochi) - {c['author']}")
+            print(f"[{c['id']}] {c['title']} ({c['appCount']} games) - {c['author']}")
         return 0
     elif args.action in ("show", "details"):
         slug = args.slug
         rep = coll_mod.fetch_collection_details(slug)
         if emit(args, rep):
             return 0
-        print(f"Collezione: {rep.get('title')} ({len(rep.get('apps', []))} giochi)")
+        print(f"Collection: {rep.get('title')} ({len(rep.get('apps', []))} games)")
         for a in rep.get("apps", []):
             print(" -", a)
         return 0
@@ -708,7 +707,7 @@ def cmd_collections(args):
             enqueued.append(target_id)
         if emit(args, {"ok": True, "collection": slug, "enqueued": enqueued}):
             return 0
-        print(f"Accodati {len(enqueued)} giochi dalla collezione {slug}")
+        print(f"Enqueued {len(enqueued)} games from collection {slug}")
         return 0
     return 1
 
@@ -729,7 +728,7 @@ def cmd_vault(args):
         vault.restore(args.appid, args.timestamp, stplug)
         if emit(args, {"ok": True, "appid": args.appid, "restored": args.timestamp}):
             return 0
-        print(f"Ripristinato snapshot {args.timestamp} per {args.appid}")
+        print(f"Restored snapshot {args.timestamp} for {args.appid}")
         return 0
     return 1
 
@@ -766,87 +765,87 @@ def cmd_queue(args):
         q.cancel(args.appid)
         if emit(args, {"ok": True, "cancelled": args.appid}):
             return 0
-        print("Annullato download di", args.appid)
+        print("Cancelled download of", args.appid)
         return 0
     return 1
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="maclua",
-                                 description="Giochi Steam su macOS, senza hook.")
+                                 description="Steam game manager for macOS without client hooks.")
     ap.add_argument("--json", action="store_true",
-                    help="output macchina-leggibile per la GUI")
+                    help="machine-readable JSON output for GUI")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("search", help="cerca appid per nome")
+    p = sub.add_parser("search", help="search appid by name")
     p.add_argument("name")
     p.set_defaults(fn=cmd_search)
-    p = sub.add_parser("add", help="importa un .lua (file o sorgente)")
+    p = sub.add_parser("add", help="import a .lua (file or remote source)")
     p.add_argument("--appid", type=int, required=True)
     p.add_argument("--lua", default=None,
-                   help="file .lua locale (senza: scarica dalla sorgente)")
+                   help="local .lua file (default: download from source)")
     p.add_argument("--manifest-dir", default=None)
     p.set_defaults(fn=cmd_add)
-    p = sub.add_parser("update", help="scarica/aggiorna senza reinstallare")
+    p = sub.add_parser("update", help="download or update files without reinstalling")
     p.add_argument("appid", type=int)
     p.add_argument("-j", "--jobs", type=int, default=8)
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(fn=cmd_update)
-    p = sub.add_parser("verify", help="verifica file installati")
+    p = sub.add_parser("verify", help="verify installed files")
     p.add_argument("appid", type=int)
     p.set_defaults(fn=cmd_verify)
-    p = sub.add_parser("remove", help="rimuove un gioco gestito")
+    p = sub.add_parser("remove", help="remove a managed game")
     p.add_argument("appid", type=int)
     p.set_defaults(fn=cmd_remove)
-    p = sub.add_parser("status", help="stato licenze/gestiti")
+    p = sub.add_parser("status", help="status of licenses and managed games")
     p.add_argument("appid", type=int, nargs="?")
     p.set_defaults(fn=cmd_status)
-    p = sub.add_parser("install", help="apre il dialogo Installa di Steam")
+    p = sub.add_parser("install", help="open Steam install dialog")
     p.add_argument("appid", type=int)
     p.set_defaults(fn=cmd_install)
-    p = sub.add_parser("ensure", help="riapplica licenze+manifest+chiavi")
+    p = sub.add_parser("ensure", help="reapply licenses, manifests, and keys")
     p.set_defaults(fn=cmd_ensure)
-    p = sub.add_parser("doctor", help="controlli ambiente")
+    p = sub.add_parser("doctor", help="environment diagnostics")
     p.set_defaults(fn=cmd_doctor)
-    p = sub.add_parser("config", help="chiave API sorgente")
+    p = sub.add_parser("config", help="source API key configuration")
     p.add_argument("action", choices=["set-key", "clear-key", "show"])
     p.add_argument("value", nargs="?")
     p.set_defaults(fn=cmd_config)
-    p = sub.add_parser("agent", help="ensure automatico a ogni login")
+    p = sub.add_parser("agent", help="automatic ensure on user login")
     p.add_argument("action", choices=["install", "remove", "status"])
     p.set_defaults(fn=cmd_agent)
 
-    # Nuovi comandi bridge e steam-hook
-    p = sub.add_parser("bridge", help="server bridge locale per Steam UI e GUI")
+    # Bridge and steam-hook commands
+    p = sub.add_parser("bridge", help="local bridge HTTP server for Steam UI and GUI")
     p.add_argument("action", choices=["serve", "token"])
     p.add_argument("--port", type=int, default=6767)
     p.set_defaults(fn=cmd_bridge)
 
-    p = sub.add_parser("steam-hook", help="integrazione nativa Steam client CEF")
+    p = sub.add_parser("steam-hook", help="native Steam client CEF integration")
     p.add_argument("action", choices=["enable", "disable", "status", "inject", "restart"])
     p.set_defaults(fn=cmd_steam_hook)
 
-    p = sub.add_parser("collections", help="collezioni comunitarie di giochi")
+    p = sub.add_parser("collections", help="community game collections")
     p.add_argument("action", choices=["list", "show", "add"])
     p.add_argument("slug", nargs="?")
     p.add_argument("--sort", default="popular")
     p.set_defaults(fn=cmd_collections)
 
-    p = sub.add_parser("vault", help="backup e versioni dei file lua")
+    p = sub.add_parser("vault", help="backup and versioning for lua files")
     p.add_argument("action", choices=["list", "restore"])
     p.add_argument("appid", type=int, nargs="?")
     p.add_argument("timestamp", type=int, nargs="?")
     p.set_defaults(fn=cmd_vault)
 
-    p = sub.add_parser("fixes", help="registro fix applicati")
+    p = sub.add_parser("fixes", help="applied fixes registry")
     p.add_argument("action", choices=["list"])
     p.add_argument("appid", type=int, nargs="?")
     p.set_defaults(fn=cmd_fixes)
 
-    p = sub.add_parser("depots", help="ispettore depot e build (stile LuaTools)")
+    p = sub.add_parser("depots", help="depot and build inspector (LuaTools style)")
     p.add_argument("appid", type=int)
     p.set_defaults(fn=cmd_depots)
 
-    p = sub.add_parser("queue", help="coda di download")
+    p = sub.add_parser("queue", help="download queue")
     p.add_argument("action", choices=["status", "cancel"])
     p.add_argument("appid", type=int, nargs="?")
     p.set_defaults(fn=cmd_queue)
@@ -857,12 +856,12 @@ def main(argv=None):
     except ValueError as e:
         if getattr(args, "json", False):
             print(json.dumps({"error": str(e)}, ensure_ascii=False))
-        print("errore: %s" % e, file=sys.stderr)
+        print("error: %s" % e, file=sys.stderr)
         return 1
     except OSError as e:
         if getattr(args, "json", False):
             print(json.dumps({"error": "I/O: %s" % e}, ensure_ascii=False))
-        print("errore I/O: %s" % e, file=sys.stderr)
+        print("I/O error: %s" % e, file=sys.stderr)
         return 1
 
 

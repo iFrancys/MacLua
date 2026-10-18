@@ -1,10 +1,9 @@
-"""Single-flight di `ensure`.
+"""Single-flight execution of `ensure`.
 
-`ensure` è invocato in parallelo da più punti (LaunchAgent al login, sentinella
-del bridge, RPC del client): prima del lock, due esecuzioni concorrenti
-scrivevano gli stessi file con lo stesso temporaneo a nome fisso e una
-rinominava un packageinfo.vdf scritto a metà — la causa nota di "Nessuna
-licenza" nel client dopo il riavvio.
+`ensure` is invoked concurrently from multiple points (LaunchAgent at login,
+bridge sentinel, client RPC): prior to locking, two concurrent executions
+wrote the same files with the same fixed temp name and one renamed a half-written
+packageinfo.vdf — the root cause of "No license" in the client after restart.
 """
 import threading
 import time
@@ -32,7 +31,7 @@ def test_ensure_runs_body_under_lock(tmp_path):
 
 
 def test_ensure_serializes_concurrent_threads(tmp_path):
-    """Tre `ensure` concorrenti: il corpo non deve mai girare in parallelo."""
+    """Three concurrent `ensure` calls: body must never run in parallel."""
     active, peaks, results = [], [], []
 
     def fake_locked(home):
@@ -51,13 +50,13 @@ def test_ensure_serializes_concurrent_threads(tmp_path):
             t.join()
 
     assert len(results) == 3
-    assert max(peaks) == 1, "ensure eseguito in parallelo: il lock non serializza"
+    assert max(peaks) == 1, "ensure ran in parallel: lock failed to serialize"
     assert all(r.get("concurrent") is not True for r in results)
 
 
 def test_ensure_degrades_cleanly_when_lock_busy(tmp_path):
-    """Lock occupato oltre il timeout: nessun crash, risultato `concurrent`
-    compatibile con cmd_ensure (stesse chiavi del risultato normale)."""
+    """Lock held beyond timeout: no crash, `concurrent` result compatible
+    with cmd_ensure (same keys as normal result)."""
     with patch("maclua._ensure_locked") as body, \
          patch("core.atomic.FileLock.acquire", return_value=False):
         res = maclua._ensure(str(tmp_path))

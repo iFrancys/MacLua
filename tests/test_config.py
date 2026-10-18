@@ -1,4 +1,4 @@
-"""Config locale MacLua (solo la chiave API, 0600)."""
+"""Local MacLua config (API key only, 0600)."""
 import os
 
 from core import config

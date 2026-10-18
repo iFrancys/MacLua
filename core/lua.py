@@ -1,7 +1,7 @@
-"""Parse dei file .lua di Steam: addappid, chiavi depot, manifest ref.
+"""Parse Steam .lua files: addappid, depot keys, manifest refs.
 
-Solo dichiarazioni a inizio riga (dopo strip dei commenti) contano:
-i commenti -- e i long-block --[[ ]] non producono mai dichiarazioni.
+Only line-initial statements (after stripping comments) are counted:
+-- comments and --[[ ]] long blocks never produce declarations.
 """
 import re
 
@@ -14,7 +14,7 @@ _SET_MAN = re.compile(
 
 
 def _strip_line(line, in_block):
-    """Rimuove commenti; in_block porta un long-block tra le righe."""
+    """Remove comments; in_block tracks long blocks across lines."""
     if in_block:
         end = line.find(in_block)
         if end < 0:
@@ -30,9 +30,9 @@ def _strip_line(line, in_block):
             break
         in_block = "]" + m.group(1) + "]"
         line = line[:i]
-        end = line.find(in_block)  # non accade: il blocco continua sotto
+        end = line.find(in_block)  # block continues below
         break
-    # stringhe long [[ ]] fuori dai commenti: neutralizzate
+    # Neutralize long [[ ]] strings outside of comments
     line = re.sub(r"\[(=*)\[.*?\]\1\]", " ", line)
     return line, in_block
 
@@ -69,8 +69,8 @@ def parse_lua(text):
 
 
 def merge_lua(primary_text, secondary_text):
-    """Unisce due file .lua preservando tutte le chiavi depot e gli addappid bare
-    presenti in secondary_text ma assenti in primary_text (es. unione Sushi + Hubcap)."""
+    """Merge two .lua files, preserving all depot keys and bare addappids
+    present in secondary_text but missing in primary_text (e.g. Sushi + Hubcap merge)."""
     if not secondary_text:
         return primary_text
     if not primary_text:

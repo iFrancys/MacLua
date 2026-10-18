@@ -1,7 +1,7 @@
-"""Cache chiavi depot: stplug-in/*.lua -> cache/depotkey_<d>.yaml (0600).
+"""Depot key cache: stplug-in/*.lua -> cache/depotkey_<d>.yaml (0600).
 
-Formato identico a slsteam-moon (appId/depotId/key base64/managed) così
-qualsiasi meccanismo di consegna chiavi può leggere da qui.
+Format identical to slsteam-moon (appId/depotId/key base64/managed) so
+any key delivery mechanism can read from here.
 """
 import base64
 import os
@@ -21,7 +21,7 @@ def key_path(cache_dir, depot):
 
 
 def collect_keys(stplug_dir):
-    """{depot: (appid, keyhex)} da tutti i <appid>.lua (commenti esclusi)."""
+    """{depot: (appid, keyhex)} from all <appid>.lua (excluding comments)."""
     found = {}
     try:
         names = sorted(os.listdir(stplug_dir))
@@ -44,13 +44,13 @@ def collect_keys(stplug_dir):
 
 
 def write_cache(cache_dir, appid, depot, keyhex):
-    """Scrive (atomico) la chiave; idempotente a contenuto uguale."""
+    """Writes (atomic) key; idempotent when content is identical."""
     try:
         raw = bytes.fromhex(keyhex)
     except ValueError:
-        raise ValueError(f"chiave non-hex per depot {depot}")
+        raise ValueError(f"non-hex key for depot {depot}")
     if len(raw) != 32:
-        raise ValueError(f"chiave depot {depot}: {len(raw)}B, attesi 32")
+        raise ValueError(f"depot key {depot}: {len(raw)}B, expected 32")
     os.makedirs(cache_dir, exist_ok=True)
     body = ("appId: %d\ndepotId: %d\nkey: %s\nmanaged: true\n"
             % (appid, depot, base64.b64encode(raw).decode()))
@@ -66,32 +66,32 @@ def write_cache(cache_dir, appid, depot, keyhex):
 
 
 def load_key(cache_dir, depot):
-    """32 byte grezzi o ValueError."""
+    """32 raw bytes or ValueError."""
     try:
         with open(key_path(cache_dir, depot), encoding="utf-8") as f:
             txt = f.read()
     except OSError:
-        raise ValueError(f"nessuna chiave in cache per depot {depot}")
+        raise ValueError(f"no key in cache for depot {depot}")
     m = _KEY.search(txt)
     a = _APP.search(txt)
     d = _DEP.search(txt)
     if not (m and a and d) or int(d.group(1)) != depot:
-        raise ValueError(f"cache chiave illeggibile per depot {depot}")
+        raise ValueError(f"unreadable key cache for depot {depot}")
     try:
         raw = base64.b64decode(m.group(1))
     except Exception:
-        raise ValueError(f"cache chiave corrotta per depot {depot}")
+        raise ValueError(f"corrupt key cache for depot {depot}")
     if len(raw) != 32:
-        raise ValueError(f"cache chiave corrotta per depot {depot}")
+        raise ValueError(f"corrupt key cache for depot {depot}")
     return raw
 
 
 def sync_config_vdf(config_vdf_path, keys_map):
-    """Inietta chiavi depot in Steam/config/config.vdf (sezione depots).
+    """Injects depot decryption keys into Steam/config/config.vdf ('depots' section).
 
-    Legge tutte le chiavi (depot, DecryptionKey) esistenti in config.vdf,
-    le unisce alle chiavi fornite in keys_map e riscrive la sezione 'depots'
-    in modo pulito e bilanciato al primo livello, evitando qualsiasi nidificazione.
+    Reads all existing keys (depot, DecryptionKey) in config.vdf,
+    merges them with keys provided in keys_map, and rewrites the 'depots' section
+    cleanly and balanced at the first level, avoiding unintended nesting.
     """
     if not os.path.isfile(config_vdf_path):
         return 0
@@ -160,8 +160,8 @@ def sync_config_vdf(config_vdf_path, keys_map):
             existing_keys[depot_id] = key_lower
             injected += 1
 
-    # Nessuna chiave nuova o modificata: non riscrivere config.vdf (evita
-    # inutili corsie preferenziali di race con Steam che lo riscrive all'uscita).
+    # No new or modified keys: avoid rewriting config.vdf (prevents
+    # unnecessary race conditions with Steam rewriting it on shutdown).
     if injected == 0:
         return 0
 

@@ -93,7 +93,7 @@ class CDPClient:
                 unmasked[i] = data[i] ^ mask[i % 4]
             data = bytes(unmasked)
 
-        # Gestione Ping (RFC 6455 opcode 0x09) -> invia Pong (0x0A)
+        # Ping handling (RFC 6455 opcode 0x09) -> send Pong (0x0A)
         if opcode == 0x09:
             pong_head = bytearray([0x8A, 0x80 | (len(data) & 0x7F)])
             pm = os.urandom(4)
@@ -104,7 +104,7 @@ class CDPClient:
             return self.read_frame()
 
         if opcode == 0x08:
-            raise ConnectionError("WebSocket chiuso dal server")
+            raise ConnectionError("WebSocket closed by server")
 
         return data.decode("utf-8", errors="replace")
 
@@ -113,12 +113,12 @@ class CDPClient:
         while len(buf) < n:
             chunk = self.sock.recv(n - len(buf))
             if not chunk:
-                raise ConnectionError("Connessione chiusa prematuramente")
+                raise ConnectionError("Connection closed prematurely")
             buf += chunk
         return buf
 
     def evaluate(self, script, return_by_value=True):
-        """Esegue JavaScript nel contesto della pagina tramite Runtime.evaluate."""
+        """Executes JavaScript in the context of the page via Runtime.evaluate."""
         call_id = self._msg_id
         self._msg_id += 1
         req = {
@@ -132,7 +132,7 @@ class CDPClient:
         }
         self.send_frame(json.dumps(req))
 
-        # Leggi finché non arriva la risposta con id corrispondente o errore
+        # Read until matching id response or error arrives
         for _ in range(50):
             raw = self.read_frame()
             try:
@@ -147,9 +147,9 @@ class CDPClient:
         return None
 
     def add_script_on_new_document(self, script):
-        """Registra lo script in CEF tramite Page.addScriptToEvaluateOnNewDocument.
-        Viene eseguito istantaneamente e automaticamente prima di qualsiasi altro script
-        ad ogni navigazione, cambio pagina o caricamento del tab.
+        """Registers the script in CEF via Page.addScriptToEvaluateOnNewDocument.
+        Executes instantly and automatically before any other script on every navigation,
+        page switch, or tab load.
         """
         try:
             call_id = self._msg_id

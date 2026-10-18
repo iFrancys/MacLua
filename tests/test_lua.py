@@ -1,5 +1,5 @@
-"""Parse dei file .lua: addappid nudi, chiavi depot, manifest ref.
-I commenti -- non devono mai produrre dichiarazioni."""
+"""Parsing of .lua files: bare addappid, depot keys, manifest refs.
+Comments starting with -- must never yield declarations."""
 from core.lua import parse_lua
 
 K1 = "a" * 64

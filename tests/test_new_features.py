@@ -21,8 +21,8 @@ def test_install_bridge_agent_writes_plist(tmp_path, monkeypatch):
     assert "dev.maclua.bridge" in content
     assert "<string>serve</string>" in content
     assert any(c[:3] == ["launchctl", "load", "-w"] for c in calls)
-    # Regressione: mai chiamare "launchctl unload" dentro install_bridge_agent,
-    # altrimenti il demone bridge uccide se stesso con SIGTERM durante restart_steam().
+    # Regression: never call "launchctl unload" inside install_bridge_agent,
+    # otherwise the bridge daemon kills itself with SIGTERM during restart_steam().
     assert not any(c[:2] == ["launchctl", "unload"] for c in calls)
 
 

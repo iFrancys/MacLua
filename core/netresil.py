@@ -1,6 +1,6 @@
-"""Resilienza di rete: Risoluzione DNS-over-HTTPS (DoH) e supporto proxy.
-Ispirato a DohResolver di LuaTools ma implementato con stdlib Python 3.
-Permette di bypassare blocchi DNS dell'ISP per Valve CDN e sorgenti manifest.
+"""Network resilience: DNS-over-HTTPS (DoH) resolution and proxy support.
+Inspired by LuaTools DohResolver but implemented with Python 3 stdlib.
+Allows bypassing ISP DNS blocks for Valve CDN and manifest sources.
 """
 import json
 import socket
@@ -15,7 +15,7 @@ _CACHE = {}
 
 
 def resolve_doh(hostname, provider="cloudflare", timeout=5):
-    """Risolve un hostname tramite DNS-over-HTTPS."""
+    """Resolves a hostname via DNS-over-HTTPS."""
     if hostname in _CACHE:
         return _CACHE[hostname]
 
@@ -40,7 +40,7 @@ def resolve_doh(hostname, provider="cloudflare", timeout=5):
 
 
 def resolve(hostname):
-    """Risolve hostname considerando la modalità impostata (auto, always, never)."""
+    """Resolves hostname taking configured mode into account (auto, always, never)."""
     mode = settings.get("dns_mode", "auto")
     provider = settings.get("doh_provider", "cloudflare")
 
@@ -54,13 +54,13 @@ def resolve(hostname):
         ip = resolve_doh(hostname, provider=provider)
         if ip:
             return ip
-        # Fallback a DNS di sistema se DoH fallisce
+        # Fallback to system DNS if DoH fails
         try:
             return socket.gethostbyname(hostname)
         except Exception:
             return None
 
-    # mode == "auto": prova sistema prima; se fallisce prova DoH
+    # mode == "auto": try system DNS first; if it fails try DoH
     try:
         return socket.gethostbyname(hostname)
     except Exception:

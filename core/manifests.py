@@ -1,7 +1,7 @@
-"""Staging manifest: SLSsteam/manifests/*.manifest -> Steam/depotcache/.
+"""Manifest staging: SLSsteam/manifests/*.manifest -> Steam/depotcache/.
 
-Solo nomi <depot>_<gid>.manifest (tutto numerico); nient'altro viene
-copiato. Idempotente a parità di size (i manifest sono immutabili per gid).
+Only <depot>_<gid>.manifest filenames (strictly numeric); nothing else is
+copied. Idempotent based on matching file size (manifests are immutable by gid).
 """
 import os
 
@@ -17,7 +17,7 @@ def valid_name(name):
 
 
 def stage_all(src_dir, dst_dir):
-    """Ritorna (copiati, già_presenti) come liste di nomi file."""
+    """Returns (copied, already_present) as lists of filenames."""
     try:
         names = sorted(os.listdir(src_dir))
     except OSError:

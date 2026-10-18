@@ -1,7 +1,7 @@
-"""Percorsi macOS di Steam e dello stato MacLua.
+"""macOS paths for Steam and MacLua state.
 
-Ogni funzione accetta ``home`` esplicito (default: ``~``) così resta
-testabile senza toccare l'ambiente reale.
+Every function accepts an explicit ``home`` (defaults to ``~``) to remain
+testable without touching the real user environment.
 """
 import os
 

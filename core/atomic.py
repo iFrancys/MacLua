@@ -1,17 +1,17 @@
-"""Scritture atomiche sicure in caso di concorrenza + lock inter-processo.
+"""Atomic writes safe under concurrency + inter-process file locking.
 
-Perché esiste questo modulo: MacLua esegue `ensure` da più punti in parallelo
-(LaunchAgent `com.maclua.ensure`, sentinella del bridge, richieste RPC, CLI).
-Con file temporanei a nome fisso due processi che scrivono lo stesso file
-collidono: il rename di uno fallisce (ENOENT) o, peggio, l'altro rinomina un
-file temporaneo scritto a metà, lasciando il file di destinazione corrotto.
-Un `packageinfo.vdf` parziale = "Nessuna licenza" nel client Steam.
+Why this module exists: MacLua runs `ensure` concurrently from multiple points
+(LaunchAgent `com.maclua.ensure`, bridge watchdog, RPC requests, CLI).
+With fixed temporary filenames, two processes writing to the same file collide:
+one rename fails (ENOENT) or, worse, one renames a half-written temporary file,
+leaving the destination file corrupted.
+A partial `packageinfo.vdf` = "No licenses" in the Steam client.
 
-Regole:
-- ogni scrittura passa da `atomic_write`: file temporaneo UNICO per processo
-  (tempfile.mkstemp), fsync, `os.replace` atomico;
-- le sezioni che non vanno eseguite in parallelo passano da `FileLock`
-  (fcntl.flock, rilasciato automaticamente alla morte del processo).
+Rules:
+- every write goes through `atomic_write`: UNIQUE per-process temporary file
+  (tempfile.mkstemp), fsync, atomic `os.replace`;
+- sections that must not run concurrently use `FileLock`
+  (fcntl.flock, automatically released if the process terminates).
 """
 import errno
 import fcntl
@@ -21,13 +21,13 @@ import time
 
 
 def atomic_write(path, data, mode=None):
-    """Scrive `data` (bytes o str) su `path` in modo atomico.
+    """Writes `data` (bytes or str) to `path` atomically.
 
-    - il temporaneo è creato nella stessa directory di destinazione (rename
-      atomico sullo stesso filesystem) con nome univoco per processo;
-    - `os.replace` garantisce che i lettori vedano sempre o il vecchio o il
-      nuovo contenuto completo, mai un parziale;
-    - con `mode` i permessi vengono applicati al file prima della sostituzione.
+    - temporary file is created in the same destination directory (atomic rename
+      on the same filesystem) with a unique per-process name;
+    - `os.replace` guarantees readers see either the old or new complete content,
+      never partial bytes;
+    - optional `mode` permissions are applied before replacing.
     """
     if isinstance(data, str):
         data = data.encode("utf-8")
@@ -54,11 +54,11 @@ def atomic_write(path, data, mode=None):
 
 
 class FileLock:
-    """Lock esclusivo inter-processo basato su fcntl.flock.
+    """Exclusive inter-process lock based on fcntl.flock.
 
-    Il lock è legato al descrittore aperto: si serializza anche tra thread
-    dello stesso processo e viene rilasciato dal kernel se il processo muore,
-    senza file di stato da pulire a mano.
+    The lock is tied to the open file descriptor: it serializes threads within
+    the same process and is automatically released by the kernel if the process
+    dies, without leaving stale lockfiles requiring manual cleanup.
     """
 
     def __init__(self, path):

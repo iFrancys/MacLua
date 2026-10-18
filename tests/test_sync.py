@@ -1,4 +1,4 @@
-"""Sync con prune: aggiunge i gestiti, rimuove i gestiti usciti di scena."""
+"""Sync with prune: adds managed, removes unmanaged entries."""
 import json
 
 from core.license import sync, check, FORGE_ID
@@ -13,7 +13,7 @@ def test_sync_adds_and_records_state(tmp_path):
     assert check(p, {1332010}, {1332012}) == (set(), set())
     saved = json.loads(open(state).read())
     assert saved == {"appids": [1332010], "depotids": [1332012]}
-    # nativi preservati
+    # Native preserved
     assert check(p, {100}, {200}) == (set(), set())
 
 

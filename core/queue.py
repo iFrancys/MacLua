@@ -1,5 +1,5 @@
-"""Coda di download multi-gioco con calcolo di velocità (MB/s), ETA e cronologia.
-Garantisce che i download avvengano ordinatamente in background senza bloccare la UI.
+"""Multi-game download queue with speed calculation (MB/s), ETA, and history.
+Ensures downloads proceed orderly in the background without freezing the UI.
 """
 import os
 import time
@@ -47,7 +47,7 @@ class DownloadQueue:
 
     def enqueue(self, appid, name=None):
         with self._lock:
-            # Non ri-accodare se già presente
+            # Do not re-enqueue if already in queue
             if any(item["appid"] == appid for item in self.queue):
                 return False
             if self.current_job and self.current_job["appid"] == appid:
@@ -55,7 +55,7 @@ class DownloadQueue:
 
             item = {
                 "appid": appid,
-                "name": name or f"Gioco {appid}",
+                "name": name or f"Game {appid}",
                 "status": "queued",
                 "bytes": 0,
                 "total_bytes": 0,
@@ -75,7 +75,7 @@ class DownloadQueue:
     def cancel(self, appid):
         with self._lock:
             self.cancel_requested.add(appid)
-            # Rimuovi dalla coda se in attesa
+            # Remove from queue if waiting
             self.queue = deque([item for item in self.queue if item["appid"] != appid])
             if self.current_job and self.current_job["appid"] == appid:
                 self.current_job["status"] = "cancelled"
@@ -123,7 +123,7 @@ class DownloadQueue:
 
         def progress_cb(n):
             if appid in self.cancel_requested:
-                raise InterruptedError("Download annullato dall'utente")
+                raise InterruptedError("Download cancelled by user")
             item["bytes"] += n
             now = time.time()
             dt = now - last_time[0]
@@ -140,7 +140,7 @@ class DownloadQueue:
                 last_bytes[0] = item["bytes"]
 
         try:
-            # Calcolo dimensione totale se nota
+            # Calculate total size if known
             install.fetch_app(
                 appid,
                 stplug_dir=stplug,

@@ -79,11 +79,11 @@ if python3 -m pip install --help 2>&1 | grep -q -- "--break-system-packages"; th
     PIP_ARGS+=("--break-system-packages")
 fi
 
-if python3 -m pip install -r "$SCRIPT_DIR/requirements.txt" "${PIP_ARGS[@]}" &>/dev/null; then
+if python3 -m pip install -r "$SCRIPT_DIR/requirements.txt" ${PIP_ARGS[@]+"${PIP_ARGS[@]}"} &>/dev/null; then
     log_success "Python dependencies verified."
 else
     log_warn "Standard pip install failed. Retrying with --user..."
-    python3 -m pip install --user -r "$SCRIPT_DIR/requirements.txt" "${PIP_ARGS[@]}"
+    python3 -m pip install --user -r "$SCRIPT_DIR/requirements.txt" ${PIP_ARGS[@]+"${PIP_ARGS[@]}"}
     log_success "Python dependencies installed in user site-packages."
 fi
 

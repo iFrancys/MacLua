@@ -1,5 +1,5 @@
-"""Cache persistente per metadati Steam, copertine e nomi giochi.
-Riduce il carico sulle API Valve e garantisce disponibilità offline.
+"""Persistent cache for Steam metadata, covers, and game names.
+Reduces load on Valve APIs and ensures offline availability.
 """
 import os
 import json
@@ -9,7 +9,7 @@ from core.atomic import atomic_write
 
 CACHE_DIR = os.path.expanduser("~/Library/Application Support/MacLua/cache")
 CACHE_FILE = os.path.join(CACHE_DIR, "appcache.json")
-DEFAULT_TTL = 7 * 86400  # 7 giorni di validità
+DEFAULT_TTL = 7 * 86400  # 7 days validity
 
 
 def _ensure():
@@ -34,7 +34,7 @@ def _save(data):
 
 
 def get_info(appid):
-    """Restituisce le info cached se presenti e non scadute."""
+    """Returns cached info if present and not expired."""
     data = _load()
     key = str(appid)
     if key in data:
@@ -45,7 +45,7 @@ def get_info(appid):
 
 
 def set_info(appid, payload, ttl=DEFAULT_TTL):
-    """Memorizza le info nella cache."""
+    """Stores info in cache."""
     data = _load()
     data[str(appid)] = {
         "cached_at": time.time(),
@@ -56,5 +56,5 @@ def set_info(appid, payload, ttl=DEFAULT_TTL):
 
 
 def clear():
-    """Svuota la cache."""
+    """Clears the cache."""
     _save({})

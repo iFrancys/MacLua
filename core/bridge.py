@@ -1,6 +1,6 @@
-"""Server bridge HTTP locale su 127.0.0.1:6767 con autenticazione via token.
-Espone le API REST e stream SSE per l'interfaccia in-Steam (JS).
-Tutti gli endpoint rispettano rigorosamente la regola: i DLC sono SEMPRE integrati nei giochi base e mai mostrati separatamente.
+"""Local HTTP bridge server on 127.0.0.1:6767 with token authentication.
+Exposes REST APIs and SSE streams for the in-Steam interface (JS).
+All endpoints strictly respect the rule: DLCs are ALWAYS integrated into base games and never shown separately.
 """
 import os
 import json
@@ -18,11 +18,11 @@ ALLOWED_ORIGINS = {
     "http://localhost:6767"
 }
 
-# Stato in-memory del rimedio "licenze stale": protegge da loop di riavvii di Steam.
-_STALE_RESTART_COOLDOWN = 600.0   # secondi minimi tra due riavvii automatici
-_MAX_STALE_RESTARTS = 2           # riavvii automatici consecutivi prima di fermarsi
-# Sentinelle `None`: 0.0 non è un tempo valido (time.monotonic() a inizio uptime
-# è vicino a zero, es. dopo un boot: il cooldown scatterebbe senza alcun riavvio).
+# In-memory state of the "stale licenses" remediation: protects against Steam restart loops.
+_STALE_RESTART_COOLDOWN = 600.0   # minimum seconds between two automatic restarts
+_MAX_STALE_RESTARTS = 2           # consecutive automatic restarts before stopping
+# Sentinels `None`: 0.0 is not a valid time (time.monotonic() at uptime start
+# is close to zero, e.g. after a boot: cooldown would trigger without any restart).
 _STALE_STATE = {"last_restart": None, "consecutive_restarts": 0, "last_notify": None}
 
 
@@ -42,7 +42,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _verify_auth(self):
-        # Health check è pubblico
+        # Health check is public
         if self.path.split("?")[0] in ("/health", "/icon"):
             return True
         expected = steamhook.get_or_create_token()
@@ -67,7 +67,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if not self._verify_auth():
-            return self._send_json(401, {"error": "Non autorizzato: token mancante o errato"})
+            return self._send_json(401, {"error": "Unauthorized: missing or invalid token"})
 
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
@@ -114,7 +114,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             seen = set()
             for h in hits:
                 appid = h["appid"]
-                # Se è un DLC, risolvi al gioco base
+                # If it's a DLC, resolve to base game
                 parent_id = ai.parent(appid)
                 if parent_id is None:
                     parent_id, _ = catalog.parent_of(appid)
@@ -138,11 +138,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     if fn.endswith(".lua"):
                         try:
                             appid = int(fn[:-4])
-                            # Escludi se non è gioco base
+                            # Exclude if not a base game
                             p_id = ai.parent(appid)
                             if p_id is not None and p_id != appid:
                                 continue
-                            name = catalog.name_of(appid) or f"Gioco {appid}"
+                            name = catalog.name_of(appid) or f"Game {appid}"
                             installed = install.is_game_installed(appid, home)
                             up_status = updates.get_status(appid, home) if installed else None
                             if installed and not up_status:
@@ -155,7 +155,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                                             "current_buildid": chk.get("current_buildid"),
                                             "latest_buildid": chk.get("latest_buildid"),
                                             "has_update": bool(chk.get("has_update")),
-                                            "message": "Aggiornato all'ultima versione disponibile." if not chk.get("has_update") else "Aggiornamento disponibile.",
+                                            "message": "Updated to latest version available." if not chk.get("has_update") else "Update available.",
                                         }, home=home)
                                 except Exception:
                                     pass
@@ -180,9 +180,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "sources": [
                     {"id": "auto", "name": "Auto (Sushi -> Ryuu -> Hubcap)", "requires_key": False},
-                    {"id": "sushi", "name": "Sushi (GitHub Raw - Gratuito)", "requires_key": False},
-                    {"id": "ryuu", "name": "Ryuu (Anonimo - Gratuito)", "requires_key": False},
-                    {"id": "hubcap", "name": "Hubcap / Morrenus (Richiede API Key)", "requires_key": True}
+                    {"id": "sushi", "name": "Sushi (GitHub Raw - Free)", "requires_key": False},
+                    {"id": "ryuu", "name": "Ryuu (Anonymous - Free)", "requires_key": False},
+                    {"id": "hubcap", "name": "Hubcap / Morrenus (Requires API Key)", "requires_key": True}
                 ]
             })
 
@@ -190,7 +190,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             try:
                 aid = int(path.split("/")[-1])
             except ValueError:
-                return self._send_json(400, {"error": "AppID non valido"})
+                return self._send_json(400, {"error": "Invalid AppID"})
             from core import source
             ryuu_avail = source.check_ryuu(aid)
             sushi_avail = False
@@ -213,8 +213,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
             try:
                 appid = int(path.split("/")[-1])
             except ValueError:
-                return self._send_json(400, {"error": "AppID non valido"})
-            name = catalog.name_of(appid) or f"Gioco {appid}"
+                return self._send_json(400, {"error": "Invalid AppID"})
+            name = catalog.name_of(appid) or f"Game {appid}"
             home = os.path.expanduser("~")
             installed = install.is_game_installed(appid, home)
             managed = os.path.exists(os.path.join(paths.stplug_in(home), f"{appid}.lua"))
@@ -238,7 +238,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             try:
                 aid = int(path.split("/")[-1])
             except ValueError:
-                return self._send_json(400, {"error": "AppID non valido"})
+                return self._send_json(400, {"error": "Invalid AppID"})
             return self._send_json(200, get_game_depots(aid))
 
         elif path == "/depots":
@@ -269,7 +269,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return self._send_json(200, details)
 
         elif path == "/events":
-            # Server-Sent Events per aggiornamenti in tempo reale
+            # Server-Sent Events for real-time updates
             self.send_response(200)
             self._send_cors()
             self.send_header("Content-Type", "text/event-stream")
@@ -287,11 +287,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 pass
             return
 
-        return self._send_json(404, {"error": "Endpoint non trovato"})
+        return self._send_json(404, {"error": "Endpoint not found"})
 
     def do_POST(self):
         if not self._verify_auth():
-            return self._send_json(401, {"error": "Non autorizzato"})
+            return self._send_json(401, {"error": "Unauthorized"})
 
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
@@ -311,8 +311,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
         elif path == "/add":
             appid = data.get("appid")
             if not appid:
-                return self._send_json(400, {"error": "Serve appid"})
-            # Risolvi se è DLC
+                return self._send_json(400, {"error": "Missing appid"})
+            # Resolve if DLC
             p_id = ai.parent(appid)
             if p_id is None:
                 p_id, _ = catalog.parent_of(appid)
@@ -328,29 +328,29 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 fetched = source.fetch_from_sources(target_id, key=key, preferred_source=pref, auto_update=auto_up)
                 install.import_lua(target_id, fetched["lua"], fetched["manifests"], home)
 
-                # Pulisce eventuali vecchi appmanifest fantasma (StateFlags 2 con size 0)
+                # Clean up potential stale ghost appmanifests (StateFlags 2 with size 0)
                 steamapps_dir = paths.steamapps(home)
                 install.cleanup_broken_appmanifests(steamapps_dir)
 
-                # Sincronizza licenze, chiavi e manifest per Steam
+                # Synchronize licenses, keys, and manifests for Steam
                 from maclua import _ensure
                 _ensure(home)
-                # Salva snapshot nel vault
-                vault.snapshot(target_id, fetched["lua"], note="Importazione automatica in-Steam")
+                # Save snapshot in vault
+                vault.snapshot(target_id, fetched["lua"], note="Automatic in-Steam import")
 
                 try:
                     steamhook.broadcast_library_refresh(home)
                 except Exception:
                     pass
             except Exception as e:
-                return self._send_json(500, {"error": f"Errore durante l'aggiunta: {str(e)}"})
+                return self._send_json(500, {"error": f"Error during addition: {str(e)}"})
 
             return self._send_json(200, {
                 "ok": True,
                 "appid": target_id,
                 "source": fetched.get("source"),
                 "dlc_resolved": bool(p_id and p_id != appid),
-                "message": f"Aggiunto {target_id} ({fetched.get('source', 'Multi-Source')}) con tutti i DLC inclusi."
+                "message": f"Added {target_id} ({fetched.get('source', 'Multi-Source')}) with all DLCs included."
             })
 
         elif path == "/cleanup-manifests":
@@ -367,20 +367,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
         elif path == "/update":
             appid = data.get("appid")
             if not appid:
-                return self._send_json(400, {"error": "Serve appid"})
+                return self._send_json(400, {"error": "Missing appid"})
             home = os.path.expanduser("~")
-            # Aggiornamento tracciato: l'esito reale finisce in updates.json
-            # (visibile via /update-status), mai più fallimenti silenziosi.
+            # Tracked update: the real outcome is stored in updates.json
+            # (visible via /update-status), avoiding silent failures.
             try:
                 res = updates.request_update(appid, home=home)
             except Exception as e:
-                return self._send_json(500, {"error": f"Errore aggiornamento: {e}"})
+                return self._send_json(500, {"error": f"Update error: {e}"})
             return self._send_json(200, res)
 
         elif path == "/remove":
             appid = data.get("appid")
             if not appid:
-                return self._send_json(400, {"error": "Serve appid"})
+                return self._send_json(400, {"error": "Missing appid"})
             p_id = ai.parent(appid)
             if p_id is None:
                 p_id, _ = catalog.parent_of(appid)
@@ -412,33 +412,33 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 pass
 
             g_name = catalog.name_of(target_id) or f"App {target_id}"
-            return self._send_json(200, {"ok": True, "appid": target_id, "message": f"{g_name} rimosso da MacLua"})
+            return self._send_json(200, {"ok": True, "appid": target_id, "message": f"{g_name} removed from MacLua"})
 
         elif path == "/install":
             appid = data.get("appid")
             if not appid:
-                return self._send_json(400, {"error": "Serve appid"})
+                return self._send_json(400, {"error": "Missing appid"})
             added = queue.DownloadQueue.shared().enqueue(appid, name=catalog.name_of(appid))
             return self._send_json(200, {"ok": added, "appid": appid})
 
         elif path == "/cancel":
             appid = data.get("appid")
             if not appid:
-                return self._send_json(400, {"error": "Serve appid"})
+                return self._send_json(400, {"error": "Missing appid"})
             queue.DownloadQueue.shared().cancel(appid)
             return self._send_json(200, {"ok": True, "appid": appid})
 
         elif path == "/update-check":
             appid = data.get("appid")
             if not appid:
-                return self._send_json(400, {"error": "Serve appid"})
+                return self._send_json(400, {"error": "Missing appid"})
             up_info = updates.check_updates(appid)
             return self._send_json(200, up_info)
 
         elif path == "/collections/add":
             slug = data.get("id")
             if not slug:
-                return self._send_json(400, {"error": "Serve id della collezione"})
+                return self._send_json(400, {"error": "Collection id required"})
             details = coll_mod.fetch_collection_details(slug)
             apps = details.get("apps", [])
             enqueued = []
@@ -453,16 +453,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
             res = steamhook.restart_steam()
             return self._send_json(200, res)
 
-        return self._send_json(404, {"error": "Endpoint non trovato"})
+        return self._send_json(404, {"error": "Endpoint not found"})
 
     def log_message(self, format, *args):
-        # Silenzia i log HTTP standard per pulizia output
+        # Silence standard HTTP logs for clean output
         pass
 
 
 def get_game_depots(appid, home=None):
-    """Ritorna l'elenco completo dei depot per un'app (ispirato a BuildsView di LuaTools).
-    I DLC sono rigorosamente integrati: i depot dei DLC appartengono al gioco base.
+    """Returns the complete list of depots for an app (inspired by LuaTools BuildsView).
+    DLCs are strictly integrated: DLC depots belong to the base game.
     """
     home = home or os.path.expanduser("~")
     lua_path = os.path.join(paths.stplug_in(home), f"{appid}.lua")
@@ -483,7 +483,6 @@ def get_game_depots(appid, home=None):
 
     all_keys = depotkeys.collect_keys(paths.stplug_in(home))
     keys_map = {dep: keyhex for dep, (_, keyhex) in all_keys.items()}
-
 
     store_dir = paths.sls_manifests(home)
     depotcache_dir = paths.depotcache(home)
@@ -521,26 +520,26 @@ def get_game_depots(appid, home=None):
 
     return {
         "appid": appid,
-        "name": catalog.name_of(appid) or f"Gioco {appid}",
+        "name": catalog.name_of(appid) or f"Game {appid}",
         "depots_count": len(depot_list),
         "depots": depot_list
     }
 
 
 def check_stale_client_licenses(home=None):
-    """Rileva licenze "stale" nel client Steam in esecuzione e RIMEDIA da sola.
+    """Detects "stale" licenses in the running Steam client and REMEDIES them automatically.
 
-    Il client adotta packageinfo.vdf solo all'avvio: se il file su disco è
-    corretto ma giochi gestiti e installati non risultano licenziati nel client
-    in esecuzione (tipico dopo che MacLua ha ri-patchato le licenze a Steam
-    acceso), l'unico rimedio è riavviare Steam. Qui:
-    - si controllano TUTTI i giochi gestiti+installati (non un solo campione);
-    - se serve, si riavvia Steam automaticamente SOLO quando è sicuro
-      (nessun gioco in esecuzione) e se la setting auto_restart_steam è attiva;
-    - con giochi in esecuzione o dopo troppi tentativi falliti: notifica e stop
-      (mai loop di riavvii).
+    The client only adopts packageinfo.vdf on startup: if the file on disk is
+    valid but managed and installed games do not appear licensed in the running
+    client (common after MacLua re-patches licenses while Steam is running),
+    the only remedy is restarting Steam. Here:
+    - ALL managed+installed games are checked (not just a single sample);
+    - if needed, Steam is restarted automatically ONLY when safe
+      (no game running) and if the auto_restart_steam setting is active;
+    - with games running or after too many failed attempts: notify and stop
+      (never a restart loop).
 
-    Ritorna un dict con l'esito; False quando non c'è nulla da fare.
+    Returns a dict with the outcome; False when there is nothing to do.
     """
     home = home or os.path.expanduser("~")
     if not steamhook.is_cdp_available(0.1):
@@ -566,7 +565,7 @@ def check_stale_client_licenses(home=None):
     appids, depots = maclua._managed_sets(home)
     m_app, m_dep = license.check(pkginfo, appids, depots)
     if m_app or m_dep:
-        # Il file stesso è incompleto: se ne occupa la sentinella, non l'utente.
+        # The file itself is incomplete: handled by sentinel, not user.
         return False
 
     now = time.monotonic()
@@ -582,26 +581,26 @@ def check_stale_client_licenses(home=None):
 
     if _STALE_STATE["consecutive_restarts"] >= _MAX_STALE_RESTARTS:
         _notify_throttled(
-            "Steam sta usando licenze non aggiornate: riavvialo manualmente "
-            "(pulsante Riavvia Steam nel riquadro MacLua).")
+            "Steam is using outdated licenses: restart it manually "
+            "(Restart Steam button in MacLua banner).")
         return {"stale": stale, "restarted": False, "reason": "limit"}
 
     running = steamhook.running_managed_appids(home)
     if running:
         _notify_throttled(
-            "Hai un gioco aperto e Steam sta usando licenze non aggiornate: "
-            "riavvia Steam appena hai finito di giocare.")
+            "A game is running and Steam is using outdated licenses: "
+            "restart Steam once finished playing.")
         return {"stale": stale, "restarted": False, "reason": "game_running"}
 
     if not settings.get("auto_restart_steam", True):
         _notify_throttled(
-            "Steam sta usando licenze non aggiornate: riavvialo per far "
-            "partire i giochi (pulsante Riavvia Steam nel riquadro MacLua).")
+            "Steam is using outdated licenses: restart it to launch "
+            "games (Restart Steam button in MacLua banner).")
         return {"stale": stale, "restarted": False, "reason": "setting_off"}
 
     steamhook.notify_macos(
         "MacLua",
-        "Licenze Steam non aggiornate: riavvio Steam da solo per applicarle.")
+        "Outdated Steam licenses: restarting Steam automatically to apply them.")
     steamhook.restart_steam()
     _STALE_STATE["last_restart"] = now
     _STALE_STATE["consecutive_restarts"] += 1
@@ -609,9 +608,9 @@ def check_stale_client_licenses(home=None):
 
 
 def start_continuous_injector_daemon():
-    """Avvia i thread demone dedicati:
-    1. MacLuaTabRpcDaemon: loop ultra-rapido (150ms) per RPC e iniezione tab Store.
-    2. MacLuaSentinelDaemon: loop (500ms) per sentinella packageinfo.vdf e sync periodico libreria.
+    """Starts dedicated daemon threads:
+    1. MacLuaTabRpcDaemon: ultra-fast loop (150ms) for Store tab RPC and injection.
+    2. MacLuaSentinelDaemon: loop (500ms) for packageinfo.vdf sentinel and periodic library sync.
     """
     def _tab_rpc_loop():
         while True:
@@ -639,7 +638,7 @@ def start_continuous_injector_daemon():
         while True:
             try:
                 now = time.monotonic()
-                # 1. Sentinella licenze: monitora mtime di packageinfo.vdf
+                # 1. License sentinel: monitor packageinfo.vdf mtime
                 if os.path.exists(pkginfo):
                     try:
                         cur_mtime = os.path.getmtime(pkginfo)
@@ -658,24 +657,23 @@ def start_continuous_injector_daemon():
                     except Exception:
                         pass
 
-                # 2. Sincronizzazione libreria in SharedJSContext (solo se CDP è pronto)
+                # 2. Library synchronization in SharedJSContext (only if CDP is ready)
                 if (tick < 10 or (now - last_library_sync) >= 10.0) and steamhook.is_cdp_available(0.1):
                     res = steamhook.sync_library_in_steam(home)
                     if res and res.get("ok"):
                         last_library_sync = now
 
-                # 3. Controllo licenze stale del client ogni 5 minuti: se il file
-                #    su disco è corretto ma il client non vede le licenze, riavvia
-                #    Steam da solo (con guardie anti-loop e giochi in esecuzione).
+                # 3. Client stale license check every 5 minutes: if file on disk
+                #    is valid but client does not see licenses, restart Steam
+                #    automatically (with anti-loop guards and running games check).
                 if tick > 0 and tick % 600 == 0:
                     try:
                         check_stale_client_licenses(home)
                     except Exception:
                         pass
 
-                # 4. Watcher aggiornamenti ogni 10 minuti: applica da solo gli
-                #    aggiornamenti quando i manifest sono disponibili, con retry
-                #    e stato onesto in updates.json.
+                # 4. Update watcher every 10 minutes: applies updates automatically
+                #    when manifests are available, with retries and status in updates.json.
                 if tick % 1200 == 0:
                     try:
                         updates.background_tick(home)

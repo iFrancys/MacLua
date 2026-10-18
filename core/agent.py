@@ -1,8 +1,8 @@
-"""LaunchAgent di login: `maclua ensure` a ogni avvio, prima di Steam.
+"""Login LaunchAgent: runs `maclua ensure` on every user login, before Steam.
 
-Senza hook nel client, le licenze su disco sono l'unica cosa che fa
-apparire i giochi. Steam le sovrascrive a ogni update: l'agent le
-riapplica a ogni login. Disattivare "Steam → apri al login" evita la race.
+Without client hooks, on-disk licenses are what make games appear in Steam.
+Steam overwrites them on update; the agent reapplies them on every login.
+Disabling 'Steam -> Open at Login' avoids race conditions.
 """
 import os
 import plistlib
@@ -27,7 +27,7 @@ def agent_path(launch_agents_dir):
 
 
 def install(python, maclua_py, launch_agents_dir):
-    """Scrive il plist. Ritorna il path. Non carica (serve logout/login)."""
+    """Writes the plist file. Returns the path. Does not load (requires logout/login)."""
     os.makedirs(launch_agents_dir, exist_ok=True)
     path = agent_path(launch_agents_dir)
     atomic_write(path, plist_bytes(python, maclua_py))

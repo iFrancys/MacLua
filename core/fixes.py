@@ -1,5 +1,5 @@
-"""Registro delle correzioni applicate (Fix Index).
-Tiene traccia di modifiche di compatibilità, wrapper Mach-O e patch applicate ai giochi.
+"""Applied Fixes Registry (Fix Index).
+Tracks compatibility tweaks, Mach-O wrappers, and patches applied to games.
 """
 import os
 import json
@@ -33,7 +33,7 @@ def _save(data):
 
 
 def record_fix(appid, fix_type, details=None):
-    """Registra una correzione applicata a un gioco."""
+    """Records a compatibility fix applied to a game."""
     data = _load()
     key = str(appid)
     if key not in data:
@@ -44,7 +44,7 @@ def record_fix(appid, fix_type, details=None):
         "details": details or {},
         "timestamp": int(time.time())
     }
-    # Evita duplicati identici
+    # Avoid duplicate entries of the same type
     data[key] = [f for f in data[key] if f.get("type") != fix_type]
     data[key].append(fix_entry)
     _save(data)
@@ -52,8 +52,9 @@ def record_fix(appid, fix_type, details=None):
 
 
 def get_fixes(appid=None):
-    """Restituisce le correzioni registrate per un gioco o per tutti."""
+    """Returns recorded fixes for a specific appid or all games."""
     data = _load()
     if appid is not None:
         return data.get(str(appid), [])
     return data
+

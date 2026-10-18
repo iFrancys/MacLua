@@ -1,5 +1,5 @@
-"""Modulo Collezioni: integrazione e recupero elenchi curati dalla community (lua.tools/collections).
-Supporta parsing HTML live di Next.js e fallback offline robusto.
+"""Collections module: integration and retrieval of community curated lists (lua.tools/collections).
+Supports live Next.js HTML parsing and robust offline fallbacks.
 """
 import os
 import re
@@ -11,7 +11,7 @@ from core.atomic import atomic_write
 CACHE_DIR = os.path.expanduser("~/Library/Application Support/MacLua")
 CACHE_FILE = os.path.join(CACHE_DIR, "collections_cache.json")
 
-# Collezione di fallback locale curata
+# Curated local fallback collection
 DEFAULT_FALLBACK = [
     {
         "id": "e4f40c3c-friendslop",
@@ -62,7 +62,7 @@ def _save_cache(data):
 
 
 def fetch_collections(sort="popular", timeout=8):
-    """Scarica l'elenco delle collezioni live da lua.tools/collections."""
+    """Fetches list of live collections from lua.tools/collections."""
     url = f"https://lua.tools/collections?sort={sort}"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 MacLua/1.0"})
 
@@ -71,7 +71,7 @@ def fetch_collections(sort="popular", timeout=8):
             html = resp.read().decode("utf-8")
 
         collections = []
-        # Estrai slug /c/<slug> e dati del blocco
+        # Extract /c/<slug> and block data
         pattern = re.compile(
             r'href="/c/([a-zA-Z0-9_-]+)"[^>]*>.*?'
             r'<img[^>]+src="([^"]+)"[^>]*>.*?'
@@ -97,14 +97,14 @@ def fetch_collections(sort="popular", timeout=8):
     except Exception as e:
         pass
 
-    # Fallback offline
+    # Offline fallback
     cached = _load_cache()
     return {"collections": cached, "cached": True, "stale": True}
 
 
 def fetch_collection_details(slug, timeout=8):
-    """Scarica i dettagli e la lista degli AppID per una specifica collezione."""
-    # Prima cerca nella cache se ha già apps
+    """Fetches details and AppID list for a specific collection."""
+    # First check if cache already has apps
     cached = _load_cache()
     for c in cached:
         if c.get("id") == slug and c.get("apps"):
@@ -127,14 +127,14 @@ def fetch_collection_details(slug, timeout=8):
                 seen.add(ia)
                 apps.append(ia)
 
-        # Cerca titolo
+        # Look for title
         t_match = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
         if t_match:
             title = t_match.group(1).strip()
     except Exception:
         pass
 
-    # Aggiorna la cache
+    # Update cache
     for c in cached:
         if c.get("id") == slug:
             if apps:

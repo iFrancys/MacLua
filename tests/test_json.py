@@ -104,7 +104,8 @@ def test_json_errors_also_on_stderr(tmp_path):
 def test_json_add_without_key_reports_error(tmp_path):
     r = _run_home(tmp_path, "--json", "add", "--appid", "1")
     assert r.returncode == 2
-    assert "chiave" in json.loads(r.stdout)["error"]
+    err = json.loads(r.stdout)["error"].lower()
+    assert "key" in err or "chiave" in err
 
 
 def test_set_key_from_stdin_and_clear(tmp_path):

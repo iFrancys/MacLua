@@ -82,14 +82,14 @@ def test_sync_config_vdf_no_nesting_and_idempotent(tmp_path):
     assert '"100"' in content
     assert '"200"' in content
     assert '"300"' in content
-    # Assicura che le parentesi graffe siano perfettamente bilanciate
+    # Ensure braces are perfectly balanced
     assert content.count('{') == content.count('}')
-    # Verifica che '200' non sia nidificato dentro '100'
+    # Verify that '200' is not nested inside '100'
     m_100 = re.search(r'"100"\s*\{[^}]*\}', content)
     assert m_100 is not None
     assert '"200"' not in m_100.group(0)
 
-    # Seconda sincronizzazione idempotente
+    # Second synchronization is idempotent
     sync_config_vdf(str(cfg), keys)
     content2 = cfg.read_text()
     assert content2 == content

@@ -1,7 +1,7 @@
-"""Catalogo Steam via API pubbliche (nessuna chiave richiesta).
+"""Steam catalog via public APIs (no key required).
 
 - search: /api/storesearch/?term=... -> [{appid, name}]
-- platforms: /api/appdetails?appids=... -> {windows,mac,linux} disponibili
+- platforms: /api/appdetails?appids=... -> {windows,mac,linux} available
 """
 import json
 import urllib.error
@@ -16,15 +16,15 @@ def _get_json(url, timeout=20):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
-                raise ValueError("HTTP %s da %s" % (resp.status, url))
+                raise ValueError("HTTP %s from %s" % (resp.status, url))
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
             OSError, json.JSONDecodeError) as e:
-        raise ValueError("catalogo non raggiungibile: %s" % e)
+        raise ValueError("catalog unreachable: %s" % e)
 
 
 def search(query, base=STORE):
-    """[(appid, name)] per nome gioco, ordinati per rilevanza dello store."""
+    """[(appid, name)] by game name, sorted by store relevance."""
     url = "%s/api/storesearch/?term=%s&l=english&cc=US" % (
         base.rstrip("/"), urllib.parse.quote(query))
     data = _get_json(url)
@@ -38,7 +38,7 @@ def search(query, base=STORE):
 
 
 def platforms(appid, base=STORE):
-    """Sottoinsieme di {'windows','mac','linux'} disponibile."""
+    """Subset of {'windows','mac','linux'} available."""
     url = "%s/api/appdetails?appids=%d&filters=platforms" % (
         base.rstrip("/"), int(appid))
     data = _get_json(url)
@@ -48,7 +48,7 @@ def platforms(appid, base=STORE):
 
 
 def app_details(appid, base=STORE, use_cache=True):
-    """Informazioni base dell'app dallo store: type, parent_appid, dlc, name."""
+    """Basic app info from store: type, parent_appid, dlc, name."""
     if use_cache and base == STORE:
         try:
             from core import appcache
@@ -90,19 +90,19 @@ def app_details(appid, base=STORE, use_cache=True):
 
 
 def parent_of(appid, base=STORE):
-    """(parent_appid, parent_name) se appid è un DLC, altrimenti (None, None)."""
+    """(parent_appid, parent_name) if appid is a DLC, else (None, None)."""
     info = app_details(appid, base=base)
     return info.get("parent_appid"), info.get("parent_name")
 
 
 def dlc_ids(appid, base=STORE):
-    """[dlc_appid, ...] per un gioco base dallo store."""
+    """[dlc_appid, ...] for a base game from the store."""
     info = app_details(appid, base=base)
     return info.get("dlc") or []
 
 
 def name_of(appid, base=STORE):
-    """Nome dell'app dallo store o da cache locale."""
+    """App name from store or local cache."""
     if base == STORE:
         try:
             from core import appinfo as ai
@@ -120,5 +120,6 @@ def name_of(appid, base=STORE):
             pass
     info = app_details(appid, base=base)
     return info.get("name") or None
+
 
 

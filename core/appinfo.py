@@ -1,11 +1,11 @@
-"""Lettura voce app da appcache/appinfo.vdf (VDF binario, chiavi numeriche)."""
+"""Reads app entries from appcache/appinfo.vdf (binary VDF with numeric keys)."""
 import os
 import struct
 
 from core import paths
 
 _HEADER = 8
-_ANCHOR = b"\x02\x01\x00\x00\x00"  # nodo i32 con indice chiave 1 == "appid"
+_ANCHOR = b"\x02\x01\x00\x00\x00"  # i32 node with key index 1 == "appid"
 
 
 def _string_table(d):
@@ -46,7 +46,7 @@ def _parse(d, names, off, end):
             out.append((key, struct.unpack_from("<q", d, off)[0]))
             off += 8
         else:
-            raise ValueError("tipo VDF non previsto 0x%02x a 0x%x" % (t, off - 1))
+            raise ValueError("unexpected VDF type 0x%02x at 0x%x" % (t, off - 1))
     return out, off
 
 
@@ -101,7 +101,7 @@ def _get_cache(path):
 
 
 def entry(appid, path=None):
-    """Ramo figlio di 'appinfo', o None se l'app non è in cache (con cache I/O mtime)."""
+    """Child branch of 'appinfo', or None if app is not cached (with mtime I/O cache)."""
     path = path or os.path.join(paths.appcache(), "appinfo.vdf")
     c = _get_cache(path)
     if not c:
@@ -121,7 +121,7 @@ def entry(appid, path=None):
 
 
 def appinfo_of(appid, path=None):
-    """Dizionario con i metadati per appid (extended, common, ecc.)."""
+    """Metadata dictionary for appid (extended, common, etc.)."""
     root = entry(appid, path)
     if not root:
         return {}
@@ -147,7 +147,7 @@ def _child(nodes, name):
 
 
 def depots(appid, path=None):
-    """[{id, oslist, gid, size, shared}] per i depot pubblici dell'app."""
+    """[{id, oslist, gid, size, shared}] for public depots of the app."""
     root = entry(appid, path)
     if root is None:
         return []
@@ -176,7 +176,7 @@ def depot_ids(appid, path=None):
 
 
 def config(appid, path=None):
-    """{'name','installdir'} da common/config, o {} se assenti."""
+    """{'name','installdir'} from common/config, or {} if missing."""
     root = entry(appid, path)
     if root is None:
         return {}
@@ -193,7 +193,7 @@ def config(appid, path=None):
 
 
 def public_buildid(appid, path=None):
-    """buildid del branch public, o None."""
+    """buildid for public branch, or None."""
     root = entry(appid, path)
     if root is None:
         return None
@@ -209,7 +209,7 @@ def public_buildid(appid, path=None):
 
 
 def listofdlc(appid, path=None):
-    """[dlc_appid, ...] da extended/listofdlc in appinfo.vdf."""
+    """[dlc_appid, ...] from extended/listofdlc in appinfo.vdf."""
     root = entry(appid, path)
     if not root:
         return []
@@ -226,7 +226,7 @@ def listofdlc(appid, path=None):
 
 
 def parent(appid, path=None):
-    """Parent appid se questa app è un DLC, altrimenti None."""
+    """Parent appid if this app is a DLC, else None."""
     root = entry(appid, path)
     if not root:
         return None
@@ -236,4 +236,5 @@ def parent(appid, path=None):
         if val is not None and str(val).isdigit():
             return int(val)
     return None
+
 

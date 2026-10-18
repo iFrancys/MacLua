@@ -1,9 +1,9 @@
-"""Scritture atomiche e lock inter-processo: prova diretta del bug 'Nessuna licenza'.
+"""Atomic writes and inter-process locking: direct proof for the 'No license' bug.
 
-Il bug storico: più processi `ensure` scrivevano lo stesso file con un
-temporaneo a nome fisso (`file.tmp` condiviso). Il rename di uno falliva
-(ENOENT, visto in /tmp/maclua-ensure.log) oppure l'altro rinomina un file
-scritto a metà -> packageinfo.vdf parziale -> licenze perse.
+Historical bug: multiple concurrent `ensure` runs wrote to the same file using
+a fixed temporary file name (shared `file.tmp`). Renaming one failed
+(ENOENT in /tmp/maclua-ensure.log) or another process renamed a half-written file
+leading to partial packageinfo.vdf and lost licenses.
 """
 import os
 import stat
@@ -38,8 +38,8 @@ def test_atomic_write_leaves_no_temp_files(tmp_path):
 
 
 def test_atomic_write_concurrent_processes_never_corrupt(tmp_path):
-    """N processi scrivono lo stesso file in parallelo: il contenuto finale
-    deve essere ESATTAMENTE uno dei payload completi, mai un misto o troncato."""
+    """N processes write the same file concurrently: the final content
+    must be EXACTLY one of the complete payloads, never interleaved or truncated."""
     target = str(tmp_path / "packageinfo.vdf")
     payload_a = "A" * 200000
     payload_b = "B" * 200000
@@ -71,8 +71,8 @@ def test_file_lock_excludes_concurrent_acquirers(tmp_path):
     lk2 = FileLock(lock_path)
     assert lk1.acquire(timeout=0.1) is True
     try:
-        # flock è per descrittore: anche nello stesso processo il secondo
-        # tentativo sullo stesso file resta escluso.
+        # flock is per file-descriptor: even within the same process a second
+        # attempt on the same file remains excluded.
         assert lk2.acquire(timeout=0.3) is False
     finally:
         lk1.release()

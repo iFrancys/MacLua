@@ -88,9 +88,9 @@ def test_sync_library_script_never_touches_mobx_internals(tmp_path):
     assert "SetApps" in script
     assert "visible_in_game_list" in script
     assert "appStore.m_mapApps" in script
-    # Sincronizzazione collezione "Lua" sui set nativi: le aggiunte vanno sia nel
-    # set vivo (m_setApps) sia in m_setAddedManually, e il membership viene
-    # persistito col metodo nativo Save() — mai con flag custom o scritture dirette.
+    # Synchronize "Lua" collection on native sets: additions go into both
+    # live set (m_setApps) and m_setAddedManually, and membership is
+    # persisted using native Save() method - never with custom flags or direct writes.
     assert "m_setAddedManually" in script
     assert "m_setRemovedManually" in script
     assert "col.Save" in script
@@ -98,10 +98,10 @@ def test_sync_library_script_never_touches_mobx_internals(tmp_path):
 
 
 def test_sync_library_script_never_reads_collectionstore_computeds(tmp_path):
-    """Regressione (crash "reading 'forEach'" / "removeEventListener" nella libreria):
-    all'avvio a freddo leggere collectionStore.uncategorizedCollection/userCollections prima che
-    Steam imposti m_mapCollectionsFromStorage avvelena per sempre il computed MobX.
-    Lo script deve attendere appStore.m_bIsInitialized e usare solo la mappa grezza."""
+    """Regression (crash "reading 'forEach'" / "removeEventListener" in library):
+    on cold start reading collectionStore.uncategorizedCollection/userCollections before
+    Steam sets m_mapCollectionsFromStorage permanently poisons the MobX computed.
+    The script must await appStore.m_bIsInitialized and use only the raw map."""
     tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
     captured = {}
     fake_client = MagicMock()
@@ -125,13 +125,13 @@ def test_sync_library_script_never_reads_collectionstore_computeds(tmp_path):
 
 
 def test_refresh_steam_ui_tabs_removed():
-    """La manipolazione del fiber ReactVirtualized è stata rimossa perché corrompeva MobX."""
+    """ReactVirtualized fiber manipulation was removed because it corrupted MobX."""
     assert not hasattr(steamhook, "refresh_steam_ui_tabs")
 
 
 def test_remove_from_steam_library_also_cleans_lua_collection(tmp_path):
-    """Rimuovere un gioco da MacLua deve toglierlo anche dalla collezione "Lua"
-    (m_setAddedManually + m_setApps + Save), senza mai aggiungerlo a m_setRemovedManually."""
+    """Removing a game from MacLua must also remove it from the "Lua" collection
+    (m_setAddedManually + m_setApps + Save), without ever adding it to m_setRemovedManually."""
     tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
     captured = {}
     fake_client = MagicMock()
@@ -150,7 +150,7 @@ def test_remove_from_steam_library_also_cleans_lua_collection(tmp_path):
     assert "m_setAddedManually.delete" in script
     assert "m_setApps.delete" in script
     assert "col.Save" in script
-    # Mai marcare come "rimosso manualmente": l'app è fuori da MacLua, non rimossa a mano dall'utente.
+    # Never mark as "removed manually": the app is simply outside MacLua, not manually removed by the user.
     assert "m_setRemovedManually.add" not in script
 
 
@@ -190,7 +190,7 @@ def test_running_managed_appids_ignores_games_not_running(tmp_path):
 
 
 def test_running_managed_appids_only_managed(tmp_path):
-    """Gli appmanifest senza un lua gestito da MacLua non vengono considerati."""
+    """Appmanifests without a MacLua-managed .lua file are ignored."""
     steamapps = tmp_path / "Library/Application Support/Steam/steamapps"
     stplug = tmp_path / "Library/Application Support/Steam/config/stplug-in"
     steamapps.mkdir(parents=True)
@@ -203,7 +203,7 @@ def test_running_managed_appids_only_managed(tmp_path):
 
 
 def test_running_managed_appids_conservative_on_pgrep_error(tmp_path):
-    """Pattern pgrep non interpretabile (returncode >= 2): prudenza, gioco considerato attivo."""
+    """Non-interpretable pgrep pattern (returncode >= 2): be conservative, consider game active."""
     steamapps = tmp_path / "Library/Application Support/Steam/steamapps"
     stplug = tmp_path / "Library/Application Support/Steam/config/stplug-in"
     steamapps.mkdir(parents=True)
@@ -218,12 +218,12 @@ def test_running_managed_appids_conservative_on_pgrep_error(tmp_path):
 
 
 def test_sync_library_refreshes_lua_collection_when_visibility_stale(tmp_path):
-    """Regressione (LUA mostra 3 invece di 11/12):
-    quando i giochi sono già salvati in col.m_setApps e col.m_setAddedManually
-    (colChanged === false), ma visible_in_game_list dei giochi non scaricati
-    viene appena ripristinato (modifiedCount > 0) o col.visibleApps.length < col.allApps.length,
-    sync_library_in_steam deve comunque chiamare ClearAppCounts() e SetApps() e
-    proteggere InitFromProto da futuri reset di visible_in_game_list."""
+    """Regression (LUA shows 3 instead of 11/12):
+    when games are already saved in col.m_setApps and col.m_setAddedManually
+    (colChanged === false), but visible_in_game_list of uninstalled games
+    has just been restored (modifiedCount > 0) or col.visibleApps.length < col.allApps.length,
+    sync_library_in_steam must still invoke ClearAppCounts() and SetApps() and
+    protect InitFromProto against future resets of visible_in_game_list."""
     tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
     captured = {}
     fake_client = MagicMock()
@@ -248,8 +248,8 @@ def test_sync_library_refreshes_lua_collection_when_visibility_stale(tmp_path):
 
 
 def test_client_app_licensed_waits_for_appstore_init():
-    """All'avvio a freddo di Steam, se appStore.m_bIsInitialized non è ancora true,
-    client_app_licensed non deve segnalare falsi positivi di licenza assente."""
+    """On cold Steam startup, if appStore.m_bIsInitialized is not yet true,
+    client_app_licensed must not report false positives of missing licenses."""
     tabs = [{"title": "SharedJSContext", "webSocketDebuggerUrl": "ws://127.0.0.1:8080/devtools/page/1"}]
     captured = {}
     fake_client = MagicMock()

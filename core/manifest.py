@@ -1,14 +1,14 @@
-"""Manifest binari dei depot Steam: sezioni, protobuf, crypto chunk.
+"""Binary Steam depot manifests: sections, protobuf, chunk crypto.
 
-Formato (SteamKit2 DepotManifest/VZipUtil/VZstdUtil):
-- sezioni: u32le magic + u32le len + body; 0x71F617D0 payload (protobuf
-  ContentManifestPayload), 0x1F4812BE metadata, 0x1B81B817 firma (skip),
-  0x32C415AB fine (senza len).
-- chunk criptati: iv=AES256-ECB(cipher[0:16]); AES256-CBC+PKCS7 resto.
-- VZa: 'VZ'+'a', footer u32 CRC32 + i32 size + 'zv' (CRC fa fede).
+Format (SteamKit2 DepotManifest/VZipUtil/VZstdUtil):
+- sections: u32le magic + u32le len + body; 0x71F617D0 payload (protobuf
+  ContentManifestPayload), 0x1F4812BE metadata, 0x1B81B817 signature (skip),
+  0x32C415AB end marker (without len).
+- encrypted chunks: iv=AES256-ECB(cipher[0:16]); AES256-CBC+PKCS7 remainder.
+- VZa: 'VZ'+'a', footer u32 CRC32 + i32 size + 'zv' (CRC authoritative).
 - VSZa: 'VSZa', footer ... + i32 size + 'zsv'.
-- ZIP: singolo entry.
-- checksum chunk: Adler32 con seed s1=0,s2=0 (zlib parte da s1=1).
+- ZIP: single entry.
+- chunk checksum: Adler32 with seed s1=0,s2=0 (zlib starts at s1=1).
 """
 import struct
 
@@ -26,24 +26,24 @@ def _u32(b, pos):
 
 def split_sections(data):
     if not data:
-        raise ValueError("manifest vuoto")
+        raise ValueError("empty manifest")
     out = []
     pos, n = 0, len(data)
     while pos < n:
         magic = _u32(data, pos)
         if magic is None:
-            raise ValueError("header sezione troncato")
+            raise ValueError("truncated section header")
         if magic == TERMINAL_MAGIC:
             if pos + 4 != n:
-                raise ValueError("marcatore terminale non finale")
+                raise ValueError("terminal marker not at end")
             pos += 4
             break
         length = _u32(data, pos + 4)
         if length is None:
-            raise ValueError("lunghezza sezione troncata")
+            raise ValueError("truncated section length")
         first, last = pos + 8, pos + 8 + length
         if last > n:
-            raise ValueError("sezione oltre la fine")
+            raise ValueError("section past end of data")
         out.append((magic, data[first:last]))
         pos = last
     return out
@@ -59,12 +59,12 @@ def _varint(buf, pos, limit):
             return result, pos
         shift += 7
         if shift >= 70:
-            raise ValueError("varint troppo lungo")
-    raise ValueError("varint troncato")
+            raise ValueError("varint too long")
+    raise ValueError("truncated varint")
 
 
 def _fields(buf, pos=0, limit=None):
-    """(field, wire, value): wire2 rende byte grezzi (niente ricorsione)."""
+    """(field, wire, value): wire2 returns raw bytes (no recursion)."""
     limit = len(buf) if limit is None else limit
     while pos < limit:
         tag, pos = _varint(buf, pos, limit)
@@ -73,22 +73,22 @@ def _fields(buf, pos=0, limit=None):
             value, pos = _varint(buf, pos, limit)
         elif wire == 1:
             if pos + 8 > limit:
-                raise ValueError("fixed64 troncato")
+                raise ValueError("truncated fixed64")
             value = struct.unpack_from("<Q", buf, pos)[0]
             pos += 8
         elif wire == 2:
             ln, pos = _varint(buf, pos, limit)
             if pos + ln > limit:
-                raise ValueError("campo bytes troncato")
+                raise ValueError("truncated bytes field")
             value = bytes(buf[pos:pos + ln])
             pos += ln
         elif wire == 5:
             if pos + 4 > limit:
-                raise ValueError("fixed32 troncato")
+                raise ValueError("truncated fixed32")
             value = struct.unpack_from("<I", buf, pos)[0]
             pos += 4
         else:
-            raise ValueError("wire type %d non supportato" % wire)
+            raise ValueError("wire type %d not supported" % wire)
         yield field, wire, value
 
 
@@ -98,7 +98,7 @@ def _parse_chunk(buf):
     for field, wire, value in _fields(buf):
         if field == 1 and wire == 2:
             if len(value) != 20:
-                raise ValueError("sha chunk non 20B")
+                raise ValueError("chunk sha not 20B")
             c["sha"] = value
         elif field == 2 and wire == 5:
             c["crc"] = value
@@ -110,7 +110,7 @@ def _parse_chunk(buf):
             c["cb_compressed"] = value
     if c["sha"] is None or None in (c["offset"], c["cb_original"],
                                     c["cb_compressed"], c["crc"]):
-        raise ValueError("chunk incompleto")
+        raise ValueError("incomplete chunk")
     return c
 
 
@@ -131,7 +131,7 @@ def _parse_file(buf):
         elif field == 7 and wire == 2:
             e["linktarget"] = value.decode("utf-8", "replace")
     if e["name"] is None or e["size"] is None:
-        raise ValueError("file mapping incompleto")
+        raise ValueError("incomplete file mapping")
     return e
 
 
@@ -152,7 +152,7 @@ def parse_metadata(payload):
 
 
 def parse_manifest_bytes(data: bytes):
-    """{'depot','gid','creation_time','filenames_encrypted','files','size'} da bytes."""
+    """{'depot','gid','creation_time','filenames_encrypted','files','size'} from bytes."""
     payload = None
     meta = {}
     for magic, body in split_sections(data):
@@ -161,16 +161,16 @@ def parse_manifest_bytes(data: bytes):
         elif magic == METADATA_MAGIC:
             meta = parse_metadata(body)
     if payload is None:
-        raise ValueError("sezione payload mancante")
+        raise ValueError("missing payload section")
     if "depot" not in meta or "gid" not in meta:
-        raise ValueError("metadati manifest mancanti")
+        raise ValueError("missing manifest metadata")
     if meta.get("filenames_encrypted"):
-        raise ValueError("nomi file criptati (serve passo AES)")
+        raise ValueError("encrypted filenames (requires AES step)")
     files = [m for field, wire, value in _fields(payload)
              if field == 1 and wire == 2
              for m in [_parse_file(value)]]
     if not files:
-        raise ValueError("payload senza file mapping")
+        raise ValueError("payload without file mapping")
     return {"depot": meta["depot"], "gid": meta["gid"],
             "creation_time": meta.get("creation_time"),
             "filenames_encrypted": False, "files": files, "size": len(data)}
@@ -184,7 +184,7 @@ def parse_manifest(path):
 
 
 def adler0(data):
-    """Adler32 di Steam (seed s1=0,s2=0; zlib parte da s1=1)."""
+    """Steam Adler32 (seed s1=0, s2=0; zlib starts at s1=1)."""
     import zlib
     n = len(data)
     a = zlib.adler32(bytes(data))
@@ -195,51 +195,51 @@ def adler0(data):
 def decrypt_chunk(cipher, key):
     """iv=AES256-ECB(cipher[:16]); plain=AES256-CBC+PKCS7(cipher[16:])."""
     if len(key) != 32:
-        raise ValueError("chiave depot 32B richiesta")
+        raise ValueError("32B depot key required")
     if len(cipher) < 32 or len(cipher) % 16:
-        raise ValueError("lunghezza cipher invalida")
+        raise ValueError("invalid cipher length")
     try:
         from Crypto.Cipher import AES
     except ImportError as e:
-        raise ValueError("pycryptodome mancante: %s" % e)
+        raise ValueError("missing pycryptodome: %s" % e)
     iv = AES.new(key, AES.MODE_ECB).decrypt(cipher[:16])
     plain = AES.new(key, AES.MODE_CBC, iv).decrypt(cipher[16:])
     pad = plain[-1]
     if pad < 1 or pad > 16 or plain[-pad:] != bytes([pad]) * pad:
-        raise ValueError("padding PKCS7 invalido")
+        raise ValueError("invalid PKCS7 padding")
     return plain[:-pad]
 
 
 def decompress_chunk(plain):
-    """Dispatch per magic -> byte non compressi (con verifica dove prevista)."""
+    """Dispatch per magic -> uncompressed bytes (with verification where specified)."""
     if plain[:4] == b"VSZa":
         try:
             import zstandard
         except ImportError as e:
-            raise ValueError("zstandard mancante: %s" % e)
+            raise ValueError("missing zstandard: %s" % e)
         import struct as _s
         if len(plain) < 8 + 11 or plain[-3:] != b"zsv":
-            raise ValueError("chunk VSZa malformato")
+            raise ValueError("malformed VSZa chunk")
         _, outsize = _s.unpack_from("<Ii", plain, len(plain) - 11)
         if outsize < 0:
-            raise ValueError("size VSZa negativa")
+            raise ValueError("negative VSZa size")
         data = zstandard.ZstdDecompressor().decompress(plain[8:-11])
         if outsize and len(data) != outsize:
-            raise ValueError("lunghezza VSZa %d != %d" % (len(data), outsize))
+            raise ValueError("VSZa length %d != %d" % (len(data), outsize))
         return data
     if plain[:2] == b"VZ" and len(plain) > 3 and plain[2:3] == b"a":
-        # VZip: stream LZMA1 senza end-marker; il padding di flush decodifica
-        # un byte fantasma -> tronca alla size del footer, CRC32 fa fede.
+        # VZip: raw LZMA1 stream without end marker; flush padding decodes
+        # an extra phantom byte -> truncate to footer size, CRC32 is authoritative.
         import lzma as _lzma
         import struct as _s
         import zlib as _z
         if len(plain) < 7 + 5 + 10:
-            raise ValueError("chunk VZa troppo corto")
+            raise ValueError("VZa chunk too short")
         if _s.unpack_from("<H", plain, len(plain) - 2)[0] != 0x767A:
-            raise ValueError("footer VZa mancante")
+            raise ValueError("missing VZa footer")
         outcrc, outsize = _s.unpack_from("<Ii", plain, len(plain) - 10)
         if outsize < 0:
-            raise ValueError("size VZa negativa")
+            raise ValueError("negative VZa size")
         props = plain[7:12]
         p = props[0]
         dec = _lzma.LZMADecompressor(
@@ -250,19 +250,19 @@ def decompress_chunk(plain):
         try:
             data = dec.decompress(plain[12:-10])
         except _lzma.LZMAError as e:
-            raise ValueError("decompressione VZa: %s" % e)
+            raise ValueError("VZa decompression error: %s" % e)
         if outsize:
             if len(data) < outsize:
-                raise ValueError("output VZa corto %d < %d" % (len(data), outsize))
+                raise ValueError("short VZa output %d < %d" % (len(data), outsize))
             data = data[:outsize]
         elif len(data) > 1 and (_z.crc32(data) & 0xFFFFFFFF) != (
                 outcrc & 0xFFFFFFFF):
-            # Senza size, il padding di flush può valere un byte fantasma:
-            # lo si toglie solo se la CRC torna (mai alla cieca).
+            # Without size, flush padding can evaluate to an extra byte:
+            # strip only if CRC matches (never blindly).
             if (_z.crc32(data[:-1]) & 0xFFFFFFFF) == (outcrc & 0xFFFFFFFF):
                 data = data[:-1]
         if (_z.crc32(data) & 0xFFFFFFFF) != (outcrc & 0xFFFFFFFF):
-            raise ValueError("CRC32 VZa errato")
+            raise ValueError("invalid VZa CRC32")
         return data
     if plain[:4] == b"PK\x03\x04":
         import io
@@ -270,6 +270,7 @@ def decompress_chunk(plain):
         with zipfile.ZipFile(io.BytesIO(plain)) as zf:
             names = zf.namelist()
             if len(names) != 1:
-                raise ValueError("ZIP chunk multi-entry")
+                raise ValueError("multi-entry ZIP chunk")
             return zf.read(names[0])
-    raise ValueError("magic chunk sconosciuto %s" % plain[:4].hex())
+    raise ValueError("unknown chunk magic %s" % plain[:4].hex())
+

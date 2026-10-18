@@ -1,6 +1,6 @@
-"""Config locale MacLua: SOLO la chiave API hubcap, file 0600.
+"""Local MacLua config: ONLY the hubcap API key, 0600 file.
 
-Precedenza: env MACLUA_HUBCAP_KEY > file. La chiave non passa mai per i log.
+Precedence: env MACLUA_HUBCAP_KEY > file. The key is never logged.
 """
 import json
 import os
@@ -20,7 +20,7 @@ def key_file(home=None):
 def set_key(home, key):
     key = (key or "").strip()
     if not key:
-        raise ValueError("chiave vuota")
+        raise ValueError("empty key")
     d = config_dir(home)
     os.makedirs(d, exist_ok=True)
     os.chmod(d, 0o700)
@@ -41,9 +41,10 @@ def get_key(home=None):
 
 
 def clear_key(home=None):
-    """Rimuove la chiave salvata su file. True se esisteva."""
+    """Removes key saved to file. Returns True if it existed."""
     try:
         os.remove(key_file(home))
         return True
     except OSError:
         return False
+

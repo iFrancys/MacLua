@@ -1,4 +1,4 @@
-"""Aggiornamenti: stato persistente onesto + watcher di background con retry."""
+"""Updates: honest persistent state + background watcher with retries."""
 import time
 from unittest.mock import patch
 
@@ -103,14 +103,14 @@ def test_background_tick_disabled_by_setting(tmp_path):
 def test_apply_locked_records_pending_on_manifest_missing(tmp_path):
     missing = {"ok": False, "manifest_missing": True,
                "current_buildid": 1, "target_buildid": 2,
-               "error": "in attesa"}
+               "error": "waiting"}
     with patch("core.updates.apply_update", return_value=missing):
         out = updates._apply_locked(322170, str(tmp_path), prev={})
     assert out["ok"] is False
     assert out["status"] == "pending"
     st = updates.get_status(322170, home=str(tmp_path))
     assert st["status"] == "pending"
-    assert st["message"] == "in attesa"
+    assert st["message"] == "waiting"
     assert st["next_try_at"] > int(time.time())
 
 
@@ -143,8 +143,8 @@ def test_request_update_returns_immediately(tmp_path):
 
 
 def test_check_updates_fetches_missing_manifests_from_sources(tmp_path):
-    """Se PICS indica un aggiornamento ma il manifest target non è ancora su disco,
-    check_updates deve interrogare le sorgenti remote e importare il manifest."""
+    """If PICS indicates an update but target manifest is not on disk yet,
+    check_updates must query remote sources and import the manifest."""
     home = str(tmp_path)
     from core import paths
     import os
@@ -176,8 +176,8 @@ def test_check_updates_fetches_missing_manifests_from_sources(tmp_path):
 
 
 def test_merge_lua_combines_hubcap_and_sushi_keys():
-    """merge_lua preserva le chiavi presenti solo in Hubcap (es. depot macOS)
-    e aggiunge quelle nuove di Sushi (es. DLC) senza duplicati."""
+    """merge_lua preserves keys present only in Hubcap (e.g. macOS depots)
+    and adds new keys from Sushi (e.g. DLCs) without duplicates."""
     from core import lua
     ka, kb, kc = "a" * 64, "b" * 64, "c" * 64
     hubcap_lua = (
@@ -197,8 +197,8 @@ def test_merge_lua_combines_hubcap_and_sushi_keys():
 
 
 def test_import_lua_merges_with_existing_stplugin_file(tmp_path):
-    """import_lua non deve sovrascrivere e perdere chiavi già presenti in
-    stplug-in/<appid>.lua quando si importa da un'altra sorgente."""
+    """import_lua must not overwrite and lose keys already present in
+    stplug-in/<appid>.lua when importing from another source."""
     home = str(tmp_path)
     import os
     from core import install, lua, paths
@@ -225,8 +225,8 @@ def test_import_lua_merges_with_existing_stplugin_file(tmp_path):
 
 
 def test_fetch_from_sources_falls_back_across_sources_for_target_gids(tmp_path):
-    """Se Sushi ha un manifest vecchio, fetch_from_sources con target_gids deve
-    provare anche le altre sorgenti (es. Hubcap/Ryuu) e unire i .lua."""
+    """If Sushi has an outdated manifest, fetch_from_sources with target_gids must
+    try other sources as well (e.g. Hubcap/Ryuu) and merge the .lua."""
     from core import lua, source
     ka, kb = "a" * 64, "b" * 64
     sushi_res = (

@@ -1,14 +1,14 @@
-"""Download chunk da CDN Steam + assemblaggio file con resume.
+"""Steam CDN chunk download + file reassembly with resume support.
 
-URL: {base}/depot/<id>/chunk/<sha1hex>, GET semplice senza auth; il token
-CDN serve solo dopo 403 e non lo abbiamo, quindi 403 passa all'host dopo.
-Ogni chunk è verificato (lunghezza LZMA/Adler) prima della scrittura.
+URL: {base}/depot/<id>/chunk/<sha1hex>, simple GET without auth; CDN token
+is only needed after 403 and we do not have it, so 403 passes to the next host.
+Each chunk is verified (LZMA/Adler length) prior to writing.
 """
 import os
 
 DEFAULT_CDN_BASES = [
-    # Rilevato via DepotDownloader -debug anonimo (app gratuita).
-    # Aggiornare se muore: stessa procedura, un host SteamCache basta.
+    # Discovered via anonymous DepotDownloader -debug (free app).
+    # Update if expired: same procedure, a single SteamCache host suffices.
     "https://cache10-fra2.steamcontent.com",
 ]
 
@@ -23,13 +23,13 @@ def _norm_path(name):
     parts = name.replace("\\", "/").split("/")
     clean = [p for p in parts if p not in ("", ".")]
     if not clean or any(p == ".." for p in parts):
-        raise ValueError("percorso non sicuro %r" % (name,))
+        raise ValueError("insecure path %r" % (name,))
     return os.path.join(*clean)
 
 
 def fetch_chunk(depot, sha20, expect_len, bases, timeout=CHUNK_TIMEOUT,
                 retries=3):
-    """Scarica un chunk; ruota le basi e riprova i transienti."""
+    """Downloads a chunk; rotates bases and retries transient errors."""
     import time as _time
     import urllib.error
     import urllib.request
@@ -47,7 +47,7 @@ def fetch_chunk(depot, sha20, expect_len, bases, timeout=CHUNK_TIMEOUT,
                         continue
                     data = resp.read()
                 if len(data) != expect_len:
-                    last_err = "%s: %d != %d byte" % (base, len(data), expect_len)
+                    last_err = "%s: %d != %d bytes" % (base, len(data), expect_len)
                     continue
                 return data
             except (urllib.error.HTTPError, urllib.error.URLError,
@@ -55,14 +55,14 @@ def fetch_chunk(depot, sha20, expect_len, bases, timeout=CHUNK_TIMEOUT,
                 last_err = "%s: %s" % (base, e)
                 continue
         _time.sleep(1)
-    raise ValueError("chunk %s fallito (%s)" % (hexid, last_err))
+    raise ValueError("chunk %s failed (%s)" % (hexid, last_err))
 
 
 def download_file(depot, entry, key, bases, out_root, workers=8, progress=None):
-    """Scarica+verifica tutti i chunk di una entry manifest. Ritorna (kind, rel).
+    """Downloads and verifies all chunks for a manifest entry. Returns (kind, rel).
 
-    Resume: se il file esiste con size giusta, valida ogni chunk su disco
-    (Adler) e riscarica solo i mancati/corrotti.
+    Resume: if the file exists with matching size, validates each chunk on disk
+    (Adler) and downloads only missing or corrupt chunks.
     """
     import concurrent.futures
     from core.manifest import adler0, decrypt_chunk, decompress_chunk
@@ -91,20 +91,20 @@ def download_file(depot, entry, key, bases, out_root, workers=8, progress=None):
         try:
             raw = fetch_chunk(depot, c["sha"], c["cb_compressed"], bases)
         except ValueError as e:
-            raise ValueError("fetch chunk %d di %s: %s" % (i, rel, e))
+            raise ValueError("fetch chunk %d of %s: %s" % (i, rel, e))
         try:
             dec = decrypt_chunk(raw, key)
         except ValueError as e:
-            raise ValueError("decrypt chunk %d di %s: %s" % (i, rel, e))
+            raise ValueError("decrypt chunk %d of %s: %s" % (i, rel, e))
         try:
             plain = decompress_chunk(dec)
         except ValueError as e:
-            raise ValueError("decompress chunk %d di %s: %s" % (i, rel, e))
+            raise ValueError("decompress chunk %d of %s: %s" % (i, rel, e))
         if len(plain) != c["cb_original"]:
-            raise ValueError("chunk %d di %s: %d != %d byte"
+            raise ValueError("chunk %d of %s: %d != %d bytes"
                              % (i, rel, len(plain), c["cb_original"]))
         if adler0(plain) != c["crc"]:
-            raise ValueError("checksum chunk %d di %s" % (i, rel))
+            raise ValueError("checksum chunk %d of %s" % (i, rel))
         return c["offset"], plain
 
     needed = list(range(len(chunks)))

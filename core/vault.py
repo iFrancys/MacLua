@@ -1,5 +1,5 @@
-"""Lua Vault: Sistema di backup, versioning e ripristino per i file lua.
-Permette di conservare storici delle configurazioni e ripristinare versioni precedenti.
+"""Lua Vault: Backup, versioning, and restore system for lua files.
+Allows maintaining configuration history and rolling back to previous versions.
 """
 import os
 import time
@@ -19,7 +19,7 @@ def _ensure(appid=None):
 
 
 def snapshot(appid, lua_content, note="Auto snapshot"):
-    """Crea un salvataggio versionato del file lua per un dato appid."""
+    """Creates a versioned snapshot of the lua file for a given appid."""
     app_dir = _ensure(appid)
     if isinstance(lua_content, str):
         data = lua_content.encode("utf-8")
@@ -33,7 +33,7 @@ def snapshot(appid, lua_content, note="Auto snapshot"):
     with open(p, "wb") as f:
         f.write(data)
 
-    # Scrivi metadati
+    # Write metadata
     meta_fn = f"{ts}_{h}.json"
     with open(os.path.join(app_dir, meta_fn), "w", encoding="utf-8") as f:
         json.dump({
@@ -48,7 +48,7 @@ def snapshot(appid, lua_content, note="Auto snapshot"):
 
 
 def list_snapshots(appid=None):
-    """Restituisce la cronologia dei backup per un appid (o per tutti)."""
+    """Returns backup history for an appid (or for all games)."""
     _ensure()
     results = []
     if appid is not None:
@@ -71,7 +71,7 @@ def list_snapshots(appid=None):
 
 
 def restore(appid, timestamp, target_dir):
-    """Ripristina una versione salvata nel percorso stplug-in."""
+    """Restores a saved version to the stplug-in directory."""
     app_dir = _ensure(appid)
     target_lua = os.path.join(target_dir, f"{appid}.lua")
 
@@ -82,9 +82,10 @@ def restore(appid, timestamp, target_dir):
             break
 
     if not found_lua or not os.path.exists(found_lua):
-        raise FileNotFoundError(f"Nessun backup trovato per appid {appid} al timestamp {timestamp}")
+        raise FileNotFoundError(f"No backup found for appid {appid} at timestamp {timestamp}")
 
     with open(found_lua, "rb") as sf, open(target_lua, "wb") as df:
         df.write(sf.read())
 
     return True
+

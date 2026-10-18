@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Script di verifica per l'integrazione in-client di Steam via CDP.
-Verifica la disponibilità di Steam CEF e inietta maclua.js/maclua.css nei tab attivi.
+"""Verification script for Steam in-client integration via CDP.
+Checks Steam CEF availability and injects maclua.js/maclua.css into active tabs.
 """
 import sys
 import os
@@ -14,23 +14,23 @@ if ROOT not in sys.path:
 from core import steamhook, cdp
 
 def main():
-    print("== Verifica In-Client Steam UI via CDP ==")
+    print("== In-Client Steam UI Verification via CDP ==")
     status = steamhook.get_status()
-    print("Marker presente:", status["marker_present"])
-    print("CDP attivo (porta 8080):", status["cdp_available"])
-    print("Tab trovati:", status["tabs_count"])
+    print("Marker present:", status["marker_present"])
+    print("CDP active (port 8080):", status["cdp_available"])
+    print("Tabs found:", status["tabs_count"])
 
     if not status["cdp_available"]:
-        print("AVVISO: Steam non ha la porta CDP 8080 aperta. Assicurati che Steam sia avviato con il marker.")
+        print("WARNING: Steam does not have CDP port 8080 open. Ensure Steam is launched with the marker.")
         return 1
 
     token = steamhook.get_or_create_token()
-    print(f"Token bridge: {token[:8]}...")
+    print(f"Bridge token: {token[:8]}...")
 
     res = steamhook.inject_into_tabs(token=token)
-    print("Risultato iniezione:", res)
+    print("Injection result:", res)
 
-    # Verifica diretta su ogni tab
+    # Direct verification on each tab
     verified = 0
     try:
         with urllib.request.urlopen("http://127.0.0.1:8080/json", timeout=2) as resp:
@@ -47,10 +47,10 @@ def main():
                 if ready == "true":
                     verified += 1
     except Exception as e:
-        print("Errore verifica:", e)
+        print("Verification error:", e)
         return 1
 
-    print(f"Verifica completata: {verified} tab Steam hanno MacLua UI caricato con successo.")
+    print(f"Verification completed: {verified} Steam tab(s) have MacLua UI successfully loaded.")
     return 0 if verified > 0 else 1
 
 if __name__ == "__main__":

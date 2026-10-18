@@ -1,9 +1,9 @@
-"""Licenze offline in packageinfo.vdf: poison package0 + forged package.
+"""Offline licenses in packageinfo.vdf: poison package0 + forged package.
 
-- package0 (gruppo 1, sempre posseduto): inietta appids+depotids gestiti.
-- forged FORGE_ID (gruppo 2): la sidebar elenca i package non-zero.
-- SHA1(file[0x2C:group2_start]) ricalcolato a ogni scrittura; changenumber
-  invariato così PICS non vede update. Tutto idempotente.
+- package0 (group 1, always owned): injects managed appids + depotids.
+- forged FORGE_ID (group 2): Steam sidebar lists non-zero packages.
+- SHA1(file[0x2C:group2_start]) recalculated on each write; changenumber
+  untouched so PICS doesn't see updates. Fully idempotent.
 """
 import hashlib
 import os
@@ -68,11 +68,11 @@ def _write_back(path, header, pkgs, rest):
 
 
 def poison(path, appids, depotids):
-    """Inietta gli id mancanti in package0; ritorna (aggiunti_app, aggiunti_dep)."""
+    """Injects missing IDs into package0; returns (added_app, added_dep)."""
     header, pkgs, rest = load_groups(path)
     p0 = _package0(pkgs)
     if p0 is None:
-        raise ValueError("package 0 assente")
+        raise ValueError("package 0 missing")
     added_app = added_dep = 0
     for c in p0[2]:
         if c[0] == "sec" and c[1] == "appids":
@@ -108,16 +108,16 @@ def _save_state(state_path, appids, depotids):
 
 
 def sync(path, want_app, want_dep, state_path):
-    """Riconcilia package0 col set gestito: aggiunge i mancanti, pota solo
-    gli id gestiti in passato e ora assenti (i nativi restano sempre).
+    """Reconciles package0 with the managed set: adds missing entries, prunes
+    only previously managed IDs that are now absent (native IDs are always kept).
 
-    Ritorna ((added_app, added_dep), (removed_app, removed_dep))."""
+    Returns ((added_app, added_dep), (removed_app, removed_dep))."""
     want_app, want_dep = set(want_app), set(want_dep)
     prev_app, prev_dep = _load_state(state_path)
     header, pkgs, rest = load_groups(path)
     p0 = _package0(pkgs)
     if p0 is None:
-        raise ValueError("package 0 assente")
+        raise ValueError("package 0 missing")
     added_app, added_dep = set(), set()
     removed_app, removed_dep = set(), set()
     for c in p0[2]:
@@ -161,13 +161,13 @@ def _build_kv(pkgid, appids, depots):
     w += str(pkgid).encode() + b"\x00"
     for k in kids:
         ser_node(k, w)
-    w.append(0x08)  # Chiude la sezione del package
-    w.append(0x08)  # Chiude la root map del KeyValues binario
+    w.append(0x08)  # Closes package section
+    w.append(0x08)  # Closes root map of binary KeyValues
     return bytes(w)
 
 
 def has_forged_package(path):
-    """Verifica se il package forgiato FORGE_ID è presente nel file."""
+    """Checks whether the forged FORGE_ID package is present in the file."""
     try:
         marker = struct.pack("<I", FORGE_ID)
         with open(path, "rb") as f:
@@ -193,11 +193,11 @@ def _remove_forged(out):
 
 
 def forge(path, appids, depots):
-    """Ricostruisce il package forgiato; con liste vuote lo rimuove e basta.
+    """Rebuilds the forged package; with empty lists it removes it cleanly.
 
-    Idempotente: se il contenuto risultante è identico a quello su disco non
-    riscrive nulla (niente churn su packageinfo.vdf a ogni ensure).
-    Scrittura atomica: Steam non può mai leggere un file a metà.
+    Idempotent: if resulting content is identical to disk, does not rewrite
+    (avoids unnecessary churn on packageinfo.vdf on every ensure).
+    Atomic write: Steam can never observe a partially written file.
     """
     with open(path, "rb") as f:
         orig = f.read()
@@ -206,7 +206,7 @@ def forge(path, appids, depots):
     if appids:
         term = out.rfind(b"\xff\xff\xff\xff")
         if term < 0:
-            raise ValueError("terminatore packageinfo assente")
+            raise ValueError("packageinfo terminator missing")
         kv = _build_kv(FORGE_ID, appids, depots)
         entry = struct.pack("<I", FORGE_ID) + hashlib.sha1(kv).digest() \
             + _OPAQUE12 + kv
@@ -216,3 +216,4 @@ def forge(path, appids, depots):
     if out == orig:
         return
     atomic_write(path, out, mode=0o755)
+

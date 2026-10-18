@@ -1,7 +1,7 @@
-"""Reader/writer minimale per il VDF binario di Steam.
+"""Minimal binary VDF reader/writer for Steam.
 
-Tipi: 0x00 sezione, 0x01 stringa, 0x02 int32, 0x07 int64. Qualsiasi altro
-tipo fallisce esplicito: meglio un errore che un file riscritto male.
+Types: 0x00 section, 0x01 string, 0x02 int32, 0x07 int64. Any other
+type fails explicitly: better an error than a poorly rewritten file.
 """
 import struct
 
@@ -20,33 +20,33 @@ class Reader:
     def u8(self):
         b = self.d[self.o:self.o + 1]
         if not b:
-            raise EOFError("u8 oltre la fine")
+            raise EOFError("u8 past EOF")
         self.o += 1
         return b[0]
 
     def cstr(self):
         end = self.d.find(b"\x00", self.o)
         if end < 0:
-            raise EOFError("stringa non terminata")
+            raise EOFError("unterminated string")
         s = self.d[self.o:end].decode("utf-8", "replace")
         self.o = end + 1
         return s
 
     def take(self, n):
         if self.o + n > len(self.d):
-            raise EOFError("payload oltre la fine")
+            raise EOFError("payload past EOF")
         b = self.d[self.o:self.o + n]
         self.o += n
         return b
 
 
 def parse_node(r):
-    """Un nodo; ('end',) sul terminatore 0x08."""
+    """A node; ('end',) on 0x08 terminator."""
     t = r.u8()
     if t == 0x08:
         return ("end",)
     if t not in _KNOWN:
-        raise ValueError("tipo VDF non supportato 0x%02x a off 0x%x" % (t, r.o - 1))
+        raise ValueError("unsupported VDF type 0x%02x at offset 0x%x" % (t, r.o - 1))
     key = r.cstr()
     if t == 0x00:
         kids = []
@@ -68,7 +68,7 @@ def _cstr(buf, s):
 
 
 def ser_node(n, buf):
-    """Accoda la codifica di n a buf (bytearray). Senza 0x08 finale."""
+    """Appends encoding of n to buf (bytearray). Without trailing 0x08."""
     tag = n[0]
     if tag == "sec":
         buf.append(0x00)

@@ -190,8 +190,8 @@ def test_stale_noop_when_file_incomplete(tmp_path):
 
 
 def test_bridge_post_restart_steam_and_cleanup_manifests_no_unbound_local(tmp_path):
-    """Regressione: do_POST non deve mai ridefinire localmente `steamhook`,
-    altrimenti /restart-steam e /cleanup-manifests falliscono con UnboundLocalError."""
+    """Regression: do_POST must never redefine `steamhook` locally,
+    otherwise /restart-steam and /cleanup-manifests fail with UnboundLocalError."""
     import io
     sent = []
 

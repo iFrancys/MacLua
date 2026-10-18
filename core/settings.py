@@ -1,6 +1,6 @@
-"""Gestione impostazioni centralizzate di MacLua.
-Condivise tra il backend Python, il bridge HTTP e l'interfaccia in-Steam.
-File memorizzato in ~/Library/Application Support/MacLua/settings.json.
+"""Centralized settings management for MacLua.
+Shared across Python backend, HTTP bridge, and in-Steam UI.
+File stored at ~/Library/Application Support/MacLua/settings.json.
 """
 import os
 import json
@@ -27,7 +27,7 @@ DEFAULT_SETTINGS = {
     "low_power_pause_gif": True,
     "preferred_source": "auto",   # "auto", "sushi", "ryuu", "hubcap"
     "hubcap_key": "",
-    "auto_restart_steam": True,   # riavvia Steam da solo quando le licenze del client sono stale
+    "auto_restart_steam": True,   # automatically restart Steam when client licenses are stale
     "donate_keys": False,
 }
 
@@ -49,7 +49,7 @@ def get_all():
             data = {}
     merged = dict(DEFAULT_SETTINGS)
     merged.update(data)
-    # Sincronizza hubcap_key con config.py se vuoto
+    # Sync hubcap_key with config.py if empty
     if not merged.get("hubcap_key"):
         from core import config
         k = config.get_key()

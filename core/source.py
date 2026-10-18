@@ -1,6 +1,6 @@
-"""Sorgente lua remota: supporto multi-database (Sushi, Ryuu, Hubcap).
-Permette il download anonimo e gratuito di manifest e file lua senza richiedere
-necessariamente una chiave API, replicando la logica di LuaTools.
+"""Remote Lua source: multi-database support (Sushi, Ryuu, Hubcap).
+Enables anonymous and free downloads of manifests and Lua files without
+requiring an API key, replicating LuaTools functionality.
 """
 import io
 import json
@@ -26,10 +26,8 @@ _MAX_MANIFEST = 64 * 1024 * 1024
 
 
 def comment_out_manifest_pins(lua_text: str) -> str:
-    """Commenta le righe setManifestid/setManifestId nel file Lua.
-    Permette a Steam di scaricare e aggiornare automaticamente l'ultima build
-    disponibile del gioco (stessa logica di LuaTools).
-    """
+    """Comment out setManifestid/setManifestId statements in Lua files.
+    Allows Steam to automatically download and track the latest available build."""
     lines = []
     for line in lua_text.splitlines():
         trimmed = line.strip()
@@ -51,56 +49,56 @@ def _download(url, timeout=60, headers=None):
                 raise ValueError("HTTP %s" % resp.status)
             size = resp.headers.get("Content-Length")
             if size is not None and int(size) > _MAX_ZIP_BYTES:
-                raise ValueError("zip oltre 256MB")
+                raise ValueError("zip exceeds 256MB")
             data = resp.read(_MAX_ZIP_BYTES + 1)
             if len(data) > _MAX_ZIP_BYTES:
-                raise ValueError("zip oltre 256MB")
+                raise ValueError("zip exceeds 256MB")
             return data
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            raise ValueError("chiave API rifiutata (401/403)")
+            raise ValueError("API key rejected (401/403)")
         if e.code == 404:
-            raise ValueError("nessun lua per questa app sulla sorgente")
+            raise ValueError("no lua for this app on source")
         if e.code == 429:
-            raise ValueError("troppe richieste, riprova più tardi")
+            raise ValueError("too many requests, please retry later")
         raise ValueError("HTTP %s" % e.code)
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise ValueError("sorgente non raggiungibile: %s" % e)
+        raise ValueError("source unreachable: %s" % e)
 
 
 def _safe_extract(data, appid):
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
-        raise ValueError("la sorgente non ha risposto uno zip valido")
+        raise ValueError("source did not return a valid zip")
     names = zf.namelist()
     if len(names) > _MAX_ENTRIES:
-        raise ValueError("troppe entry nello zip")
+        raise ValueError("too many entries in zip")
     total = 0
     for info in zf.infolist():
         total += info.file_size
         if total > _MAX_EXPANDED:
-            raise ValueError("zip espanso oltre 1GB")
-        # Normalizza i separatori Windows '\' per archivi generati su Windows (Sushi/Ryuu)
+            raise ValueError("expanded zip exceeds 1GB")
+        # Normalize Windows path separators '\' for archives created on Windows (Sushi/Ryuu)
         name = info.filename.replace("\\", "/")
         if (name.startswith("/") or ".." in name.split("/")
                 or info.is_dir()
                 or (info.external_attr >> 16) & 0o170000 in (0o120000,)):
-            raise ValueError("entry non sicura nello zip: %r" % name)
+            raise ValueError("insecure entry in zip: %r" % name)
     want = "%d.lua" % appid
     matching_lua = [n for n in names if n.replace("\\", "/").rsplit("/", 1)[-1] == want]
     if len(matching_lua) != 1:
-        raise ValueError("nello zip manca %s (o duplicato)" % want)
+        raise ValueError("zip is missing %s (or duplicate)" % want)
     lua_raw = zf.read(matching_lua[0])
     if len(lua_raw) > _MAX_LUA or not lua_raw:
-        raise ValueError("%s illeggibile" % want)
+        raise ValueError("%s unreadable" % want)
     try:
         lua_text = lua_raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise ValueError("%s non UTF-8" % want)
+        raise ValueError("%s not UTF-8" % want)
     parsed = parse_lua(lua_text)
     if appid not in parsed["bare"] and appid not in parsed["keys"]:
-        raise ValueError("il lua scaricato è per un'altra app")
+        raise ValueError("downloaded lua is for another app")
     manifests = {}
     for n in names:
         base = n.replace("\\", "/").rsplit("/", 1)[-1]
@@ -108,13 +106,13 @@ def _safe_extract(data, appid):
             with zf.open(n) as f:
                 blob = f.read(_MAX_MANIFEST + 1)
             if len(blob) > _MAX_MANIFEST:
-                raise ValueError("manifest oltre 64MB: %s" % base)
+                raise ValueError("manifest exceeds 64MB: %s" % base)
             manifests[base] = blob
     return lua_text, manifests
 
 
 def fetch_from_sushi(appid: int, timeout=20):
-    """Scarica da Sushi (GitHub Raw) senza bisogno di API key."""
+    """Download from Sushi (GitHub Raw) without requiring an API key."""
     for base in (SUSHI_PRIMARY, SUSHI_ALT):
         url = f"{base}/{appid}.zip"
         try:
@@ -122,11 +120,11 @@ def fetch_from_sushi(appid: int, timeout=20):
             return _safe_extract(data, appid)
         except Exception:
             continue
-    raise ValueError(f"App {appid} non trovata su Sushi")
+    raise ValueError(f"App {appid} not found on Sushi")
 
 
 def check_ryuu(appid: int, timeout=10) -> bool:
-    """Verifica disponibilità su Ryuu."""
+    """Check availability on Ryuu."""
     url = f"{RYUU_BASE}/check_apis?appid={appid}"
     try:
         data = _download(url, timeout=timeout, headers={"User-Agent": "secretgoonpoon"})
@@ -137,17 +135,17 @@ def check_ryuu(appid: int, timeout=10) -> bool:
 
 
 def fetch_from_ryuu(appid: int, timeout=30):
-    """Scarica da Ryuu (API anonima libera, User-Agent secretgoonpoon)."""
+    """Download from Ryuu (free anonymous API, User-Agent secretgoonpoon)."""
     url = f"{RYUU_BASE}/{appid}"
     try:
         data = _download(url, timeout=timeout, headers={"User-Agent": "secretgoonpoon"})
         return _safe_extract(data, appid)
     except Exception as e:
-        raise ValueError(f"Download Ryuu fallito per {appid}: {e}")
+        raise ValueError(f"Ryuu download failed for {appid}: {e}")
 
 
 def fetch_depot_manifest(depot_id: int, manifest_id: str, key=None, timeout=15):
-    """Scarica un singolo file .manifest per (depot_id, manifest_id) dai mirror gratuiti o Hubcap."""
+    """Download a single .manifest file for (depot_id, manifest_id) from free mirrors or Hubcap."""
     from core.manifest import parse_manifest_bytes
     depot_id = int(depot_id)
     manifest_id = str(manifest_id).strip()
@@ -182,10 +180,10 @@ def _missing_target_gids(manifests: dict, target_gids: dict) -> dict:
 
 
 def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_update=True, timeout=30, target_gids=None):
-    """Cerca e scarica da Sushi, Ryuu o Hubcap in base alla configurazione.
-    Quando si cercano aggiornamenti (target_gids specificato), se la sorgente preferita
-    non possiede ancora il nuovo manifest, interroga automaticamente anche le altre
-    sorgenti disponibili unendo sia i manifest sia le chiavi depot."""
+    """Search and download from Sushi, Ryuu, or Hubcap based on configuration.
+    When looking for updates (target_gids specified), if the preferred source does not
+    yet have the new manifest, automatically queries other available sources and merges
+    both manifests and depot keys."""
     from core.lua import merge_lua
     appid = int(appid)
     source_used = None
@@ -216,11 +214,11 @@ def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_updat
             source_used = "Ryuu"
         except Exception as e:
             if not target_gids:
-                raise ValueError(f"Sorgente Ryuu: {e}")
+                raise ValueError(f"Ryuu source: {e}")
 
     elif preferred_source == "hubcap":
         if not key and not target_gids:
-            raise ValueError("Per la sorgente Hubcap è necessaria una chiave API")
+            raise ValueError("An API key is required for Hubcap source")
         if key:
             try:
                 url = f"{HUBCAP}/api/v1/manifest/{appid}?{urllib.parse.urlencode({'api_key': key})}"
@@ -231,7 +229,7 @@ def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_updat
                     raise
 
     if preferred_source == "auto" or target_gids:
-        # 1. Prova Sushi (veloce, GitHub CDN, gratuito) se non già interrogato
+        # 1. Try Sushi (fast, GitHub CDN, free) if not already queried
         if preferred_source != "sushi":
             need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
             if need_more:
@@ -241,7 +239,7 @@ def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_updat
                 except Exception:
                     pass
 
-        # 2. Se non presente su Sushi (o se mancano i manifest target_gids), prova Ryuu
+        # 2. If not on Sushi (or if target_gids manifests are missing), try Ryuu
         if preferred_source != "ryuu":
             need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
             if need_more:
@@ -252,7 +250,7 @@ def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_updat
                 except Exception:
                     pass
 
-        # 3. Se ancora assente (o mancano target_gids) e l'utente ha configurato una chiave Hubcap, prova Hubcap
+        # 3. If still absent (or missing target_gids) and user configured a Hubcap key, try Hubcap
         if preferred_source != "hubcap":
             need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
             if need_more and key:
@@ -264,12 +262,12 @@ def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_updat
                     pass
 
     if res is None:
-        raise ValueError(f"Nessun manifest/lua trovato per appid {appid} sulle sorgenti disponibili (Sushi, Ryuu, Hubcap)")
+        raise ValueError(f"No manifest/lua found for appid {appid} on available sources (Sushi, Ryuu, Hubcap)")
 
     lua_text, manifests = res
     manifests = dict(manifests)
 
-    # Se sono stati richiesti target_gids specifici non ancora presenti nello zip, prova il download per singolo depot
+    # If specific target_gids were requested and not yet present in archive, try per-depot download
     for dep, gid in _missing_target_gids(manifests, target_gids).items():
         blob = fetch_depot_manifest(dep, gid, key=key, timeout=10)
         if blob:
@@ -283,12 +281,12 @@ def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_updat
 
 
 def fetch_lua(appid, key=None, base=HUBCAP, timeout=60, auto_update=True):
-    """Mantiene compatibilità all'indietro per CLI e test unitari."""
+    """Maintains backward compatibility for CLI and unit tests."""
     appid = int(appid)
     if base != HUBCAP:
-        # Server personalizzato (es. mock nei test)
+        # Custom server (e.g. mock in unit tests)
         if not key:
-            raise ValueError("serve una chiave API (maclua config set-key)")
+            raise ValueError("API key required (maclua config set-key)")
         url = "%s/api/v1/manifest/%d?%s" % (
             base.rstrip("/"), appid, urllib.parse.urlencode({"api_key": key}))
         lua_text, manifests = _safe_extract(_download(url, timeout), appid)
@@ -296,7 +294,7 @@ def fetch_lua(appid, key=None, base=HUBCAP, timeout=60, auto_update=True):
             lua_text = comment_out_manifest_pins(lua_text)
         return {"lua": lua_text, "manifests": manifests}
 
-    # Base predefinita: usa fetch_from_sources
+    # Default base: uses fetch_from_sources
     from core import settings
     pref = settings.get("preferred_source", "auto")
     eff_key = key or settings.get("hubcap_key", None)

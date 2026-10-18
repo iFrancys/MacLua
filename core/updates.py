@@ -1,11 +1,10 @@
-"""Controllo e applicazione aggiornamenti in-place per giochi base e nuovi DLC.
-Confronta la build/manifest realmente installati su disco con quelli pubblici PICS
-e applica aggiornamenti delta in-place senza disinstallare né perdere dati.
+"""In-place update checking and application for base games and DLCs.
+Compares installed builds and manifests on disk against public Steam PICS,
+applying delta chunk updates in-place without uninstallation or data loss.
 
-Include lo stato persistente degli aggiornamenti (`updates.json`) e il watcher
-di background: finché una sorgente non pubblica i manifest della nuova build,
-MacLua ritenta da sola con backoff e lo dice chiaramente nella UI — mai
-fallimenti silenziosi.
+Includes persistent update tracking (`updates.json`) and a background watcher:
+if a source has not yet published manifests for a new build, MacLua retries
+with exponential backoff and reports status clearly — never silent failures.
 """
 import os
 import re
@@ -14,7 +13,7 @@ import time
 from core import paths, appinfo as ai, install
 from core.atomic import atomic_write, FileLock
 
-RETRY_INTERVAL = 1800  # 30 minuti di backoff quando i manifest non sono ancora disponibili
+RETRY_INTERVAL = 1800  # 30-minute backoff when target manifests are not yet published
 
 
 def _status_path(home):
@@ -26,7 +25,7 @@ def _update_lock_path(home, appid):
 
 
 def load_status(home=None):
-    """{appid: entry} con lo stato reale di ogni aggiornamento gestito."""
+    """{appid: entry} mapping of persistent update states."""
     import json
     home = home or os.path.expanduser("~")
     try:
@@ -55,7 +54,7 @@ def set_status(appid, entry, home=None):
 
 
 def get_installed_buildid(steamapps_dir, appid, store_dir=None):
-    """Legge il buildid reale registrato in .installed_<appid>.json o nell'appmanifest."""
+    """Read the actual buildid registered in .installed_<appid>.json or appmanifest."""
     if store_dir:
         st = install.read_installed_state(store_dir, appid)
         if st and st.get("buildid"):
@@ -73,8 +72,8 @@ def get_installed_buildid(steamapps_dir, appid, store_dir=None):
 
 
 def _has_newer_staged_manifest(appid, steamapps_dir, store_dir, depotcache_dir, target_gids):
-    """True se in store_dir/depotcache_dir esiste un manifest più recente (per creation_time)
-    rispetto a quello attualmente installato su disco per almeno un depot del gioco."""
+    """True if store_dir or depotcache_dir contains a newer manifest (by creation_time)
+    than what is currently installed on disk for at least one depot."""
     from core import manifest as mf_mod
     st = install.read_installed_state(store_dir, appid)
     installed_map = {}
@@ -119,7 +118,7 @@ def _has_newer_staged_manifest(appid, steamapps_dir, store_dir, depotcache_dir, 
 
 
 def check_updates(appid, home=None):
-    """Verifica se per un appid è disponibile un aggiornamento di gioco o nuovi DLC."""
+    """Check if a game update or new DLCs are available for an appid."""
     home = home or os.path.expanduser("~")
     appid = int(appid)
     steamapps = paths.steamapps(home)
@@ -205,8 +204,8 @@ def check_updates(appid, home=None):
 
 
 def apply_update(appid, home=None, workers=8, progress=None):
-    """Scarica gli ultimi manifest disponibili dalle sorgenti e applica l'aggiornamento delta
-    in-place ai file del gioco senza disinstallare né perdere alcun salvataggio."""
+    """Download latest available manifests from sources and apply delta updates
+    in-place to game files without uninstallation or data loss."""
     from core import config, settings, source
     import maclua
 
@@ -261,7 +260,7 @@ def apply_update(appid, home=None, workers=8, progress=None):
     except Exception:
         pass
 
-    # Verifica se i manifest necessari per la versione target sono effettivamente presenti
+    # Verify that manifests required for the target version are actually present
     store_dir = paths.sls_manifests(home)
     depotcache_dir = paths.depotcache(home)
     steamapps_dir = paths.steamapps(home)
@@ -275,14 +274,13 @@ def apply_update(appid, home=None, workers=8, progress=None):
         ):
             missing_targets.append(dep)
 
-    # Se mancano i manifest della nuova versione pubblica e non c'è nemmeno un manifest
-    # intermedio più recente rispetto a quello già installato su disco
+    # If target version manifests are missing and no newer intermediate manifest exists on disk
     if missing_targets and not _has_newer_staged_manifest(appid, steamapps_dir, store_dir, depotcache_dir, target_gids):
         pub_b = ai.public_buildid(appid)
         cur_b = get_installed_buildid(steamapps_dir, appid, store_dir=store_dir)
         return {
             "ok": False,
-            "error": f"L'aggiornamento alla build {pub_b} non è ancora disponibile nelle sorgenti pubbliche (in attesa di pubblicazione su Sushi/Hubcap). I file di gioco correnti (build {cur_b}) sono intatti e pienamente funzionanti.",
+            "error": f"Update to build {pub_b} is not yet available on public sources (awaiting publication on Sushi/Hubcap). Current game files (build {cur_b}) are intact and functional.",
             "current_buildid": cur_b,
             "target_buildid": pub_b,
             "manifest_missing": True,
@@ -312,13 +310,13 @@ def _running_managed(home):
 
 
 def _apply_locked(appid, home, prev=None):
-    """Applica un aggiornamento sotto lock per-app e registra SEMPRE l'esito reale
-    in updates.json (ok / errore / in attesa dei manifest con backoff)."""
+    """Apply an update under per-app lock and ALWAYS record the real outcome
+    in updates.json (ok / error / pending manifests with backoff)."""
     appid = int(appid)
     prev = prev or {}
     lock = FileLock(_update_lock_path(home, appid))
     if not lock.acquire(timeout=0.5):
-        return {"ok": False, "busy": True, "error": "Aggiornamento già in corso"}
+        return {"ok": False, "busy": True, "error": "Update already in progress"}
     try:
         now = int(time.time())
         set_status(appid, {
@@ -326,7 +324,7 @@ def _apply_locked(appid, home, prev=None):
             "checked_at": now,
             "current_buildid": prev.get("current_buildid"),
             "latest_buildid": prev.get("latest_buildid"),
-            "message": "Aggiornamento in corso...",
+            "message": "Update in progress...",
         }, home)
         try:
             res = apply_update(appid, home=home)
@@ -342,7 +340,7 @@ def _apply_locked(appid, home, prev=None):
                 "latest_buildid": res.get("target_buildid"),
                 "attempts": attempts,
                 "next_try_at": now + RETRY_INTERVAL,
-                "message": res.get("error") or "Aggiornamento non riuscito",
+                "message": res.get("error") or "Update failed",
             }
             set_status(appid, entry, home)
             return {"ok": False, **entry}
@@ -355,7 +353,7 @@ def _apply_locked(appid, home, prev=None):
             "current_buildid": pub_b,
             "latest_buildid": pub_b,
             "has_update": False,
-            "message": "Aggiornato all'ultima versione disponibile.",
+            "message": "Updated to latest available version.",
         }, home)
         try:
             from core import steamhook as _sh
@@ -369,8 +367,8 @@ def _apply_locked(appid, home, prev=None):
 
 
 def request_update(appid, home=None, background=True):
-    """Aggiornamento richiesto dall'utente (pulsante Aggiorna): avvia in
-    background sotto lock e traccia l'esito reale in updates.json."""
+    """User-initiated update request: runs in background under lock and
+    tracks the real outcome in updates.json."""
     home = home or os.path.expanduser("~")
     appid = int(appid)
     if background:
@@ -384,9 +382,9 @@ def request_update(appid, home=None, background=True):
 
 
 def _sync_uninstalled_game(appid, home, now=None):
-    """Per i giochi presenti nella sezione LUA ma non ancora scaricati:
-    se mancano i manifest live su disco o nuovi DLC nel .lua, sincronizza
-    automaticamente da Sushi/Ryuu/Hubcap unendo le chiavi depot."""
+    """For games present in the LUA library section but not yet installed on disk:
+    if target live manifests or DLC entries are missing, synchronize automatically
+    from Sushi/Ryuu/Hubcap, merging depot keys."""
     now = now or int(time.time())
     st = get_status(appid, home) or {}
     try:
@@ -441,10 +439,10 @@ def _sync_uninstalled_game(appid, home, now=None):
 
 
 def background_tick(home=None):
-    """Watcher aggiornamenti: per ogni gioco gestito e installato controlla la
-    build pubblica PICS; se c'è un aggiornamento e i manifest sono disponibili
-    lo applica da solo, altrimenti ritenta con backoff (mai mentre il gioco è
-    in esecuzione). Ogni esito è registrato in updates.json."""
+    """Update watcher: checks public Steam PICS for each installed managed game;
+    if an update is available and manifests are ready, applies it automatically;
+    otherwise retries with backoff (never while the game is running).
+    Every outcome is recorded in updates.json."""
     from core import settings
     home = home or os.path.expanduser("~")
     if not settings.get("auto_update_apps", True):
@@ -482,7 +480,7 @@ def background_tick(home=None):
                 "current_buildid": info.get("current_buildid"),
                 "latest_buildid": info.get("latest_buildid"),
                 "has_update": False,
-                "message": "Aggiornato all'ultima versione disponibile.",
+                "message": "Updated to latest available version.",
             }, home)
             continue
         if not info.get("manifest_ready"):
@@ -495,8 +493,8 @@ def background_tick(home=None):
                 "has_update": True,
                 "attempts": attempts,
                 "next_try_at": now + RETRY_INTERVAL,
-                "message": ("Aggiornamento alla build %s non ancora disponibile "
-                            "nelle sorgenti: MacLua ritenta da sola."
+                "message": ("Update to build %s is not yet available on sources: "
+                            "MacLua will retry automatically."
                             % info.get("latest_buildid")),
             }, home)
             pending.append(aid)
@@ -509,7 +507,7 @@ def background_tick(home=None):
                 "latest_buildid": info.get("latest_buildid"),
                 "has_update": True,
                 "next_try_at": now + RETRY_INTERVAL,
-                "message": "Gioco in esecuzione: aggiornamento rimandato.",
+                "message": "Game is currently running: update deferred.",
             }, home)
             pending.append(aid)
             continue
