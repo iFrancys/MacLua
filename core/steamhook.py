@@ -464,11 +464,26 @@ def handle_rpc_request(path, method="GET", data=None):
                             continue
                         name = catalog.name_of(aid) or f"Gioco {aid}"
                         installed = install.is_game_installed(aid, home)
+                        up_status = updates.get_status(aid, home) if installed else None
+                        if installed and not up_status:
+                            try:
+                                chk = updates.check_updates(aid, home=home)
+                                if chk:
+                                    up_status = updates.set_status(aid, {
+                                        "status": "pending" if (chk.get("has_update") and not chk.get("manifest_ready")) else ("ok" if not chk.get("has_update") else "pending"),
+                                        "checked_at": int(time.time()),
+                                        "current_buildid": chk.get("current_buildid"),
+                                        "latest_buildid": chk.get("latest_buildid"),
+                                        "has_update": bool(chk.get("has_update")),
+                                        "message": "Aggiornato all'ultima versione disponibile." if not chk.get("has_update") else "Aggiornamento disponibile.",
+                                    }, home=home)
+                            except Exception:
+                                pass
                         games.append({
                             "appid": aid,
                             "name": name,
                             "installed": installed,
-                            "update": updates.get_status(aid, home) if installed else None,
+                            "update": up_status,
                             "cover": f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{aid}/header.jpg"
                         })
                     except Exception:
@@ -952,7 +967,7 @@ def inject_into_tabs(token=None, js_code=None, css_code=None, force=False):
                 try:
                     has_ver = client.evaluate("String(window.__MacLuaVersion)")
                     has_btn = client.evaluate("String(Boolean(document.getElementById('maclua-store-header-btn')))")
-                    if force or has_ver != "9":
+                    if force or has_ver != "10":
                         client.add_script_on_new_document(full_script)
                         client.evaluate(full_script)
                         injected.append({"id": t.get("id"), "url": url, "title": t.get("title")})

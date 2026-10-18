@@ -110,6 +110,7 @@
       updateErrorT: "Update failed.",
       updatePendingBadge: "update pending",
       updatingBadge: "updating...",
+      upToDate: "up to date",
     },
     it: {
       title: "MacLua Impostazioni",
@@ -155,6 +156,7 @@
       updateErrorT: "Aggiornamento non riuscito.",
       updatePendingBadge: "aggiornamento in attesa",
       updatingBadge: "aggiornamento...",
+      upToDate: "aggiornato",
     },
     de: {
       title: "MacLua Einstellungen",
@@ -200,6 +202,7 @@
       updateErrorT: "Update fehlgeschlagen.",
       updatePendingBadge: "Update ausstehend",
       updatingBadge: "Aktualisiere...",
+      upToDate: "aktuell",
     },
     es: {
       title: "MacLua Ajustes",
@@ -245,6 +248,7 @@
       updateErrorT: "Error en la actualización.",
       updatePendingBadge: "actualización pendiente",
       updatingBadge: "actualizando...",
+      upToDate: "actualizado",
     },
     fr: {
       title: "MacLua Paramètres",
@@ -290,7 +294,8 @@
       updateErrorT: "Échec de la mise à jour.",
       updatePendingBadge: "mise à jour en attente",
       updatingBadge: "mise à jour...",
-    }
+      upToDate: "à jour",
+    },
   };
 
   function getLang() {
@@ -447,6 +452,14 @@
           : "";
         const up = g.update || null;
         let updateStatusBadge = "";
+        const hasUpdate = Boolean(
+          g.installed && up && (
+            up.has_update === true ||
+            up.status === "pending" ||
+            up.status === "error" ||
+            (up.latest_buildid && up.current_buildid && Number(up.latest_buildid) > Number(up.current_buildid))
+          )
+        );
         if (up && up.status === "pending") {
           const tip = String((up && up.message) || t("updatePending")).replace(/"/g, "'");
           updateStatusBadge = `<span title="${tip}" style="margin-left: 8px; font-size: 10px; color: #f59e0b; font-weight: 700;">[⬆ ${t("updatePendingBadge")}]</span>`;
@@ -455,8 +468,10 @@
         } else if (up && up.status === "error") {
           const tip = String((up && up.message) || t("updateErrorT")).replace(/"/g, "'");
           updateStatusBadge = `<span title="${tip}" style="margin-left: 8px; font-size: 10px; color: #ef4444; font-weight: 700;">[⚠ ${t("updateErrorT")}]</span>`;
+        } else if (g.installed && up && up.status === "ok") {
+          updateStatusBadge = `<span style="margin-left: 8px; font-size: 10px; color: #38bdf8; font-weight: 600;">[✓ ${t("upToDate")}]</span>`;
         }
-        const updateBtn = g.installed
+        const updateBtn = hasUpdate
           ? `<button class="maclua-btn-update" data-aid="${g.appid}">${t("updateGame")}</button>`
           : "";
         item.innerHTML = `
@@ -980,6 +995,6 @@
     });
   }
 
-  window.__MacLuaVersion = 9;
+  window.__MacLuaVersion = 10;
   window.__MacLuaReady = true;
 })();

@@ -347,12 +347,14 @@ def _apply_locked(appid, home, prev=None):
             set_status(appid, entry, home)
             return {"ok": False, **entry}
 
+        pub_b = ai.public_buildid(appid)
         set_status(appid, {
             "status": "ok",
             "checked_at": now,
             "updated_at": now,
-            "current_buildid": ai.public_buildid(appid),
-            "latest_buildid": ai.public_buildid(appid),
+            "current_buildid": pub_b,
+            "latest_buildid": pub_b,
+            "has_update": False,
             "message": "Aggiornato all'ultima versione disponibile.",
         }, home)
         try:
@@ -479,6 +481,7 @@ def background_tick(home=None):
                 "checked_at": now,
                 "current_buildid": info.get("current_buildid"),
                 "latest_buildid": info.get("latest_buildid"),
+                "has_update": False,
                 "message": "Aggiornato all'ultima versione disponibile.",
             }, home)
             continue
@@ -489,6 +492,7 @@ def background_tick(home=None):
                 "checked_at": now,
                 "current_buildid": info.get("current_buildid"),
                 "latest_buildid": info.get("latest_buildid"),
+                "has_update": True,
                 "attempts": attempts,
                 "next_try_at": now + RETRY_INTERVAL,
                 "message": ("Aggiornamento alla build %s non ancora disponibile "
@@ -503,6 +507,7 @@ def background_tick(home=None):
                 "checked_at": now,
                 "current_buildid": info.get("current_buildid"),
                 "latest_buildid": info.get("latest_buildid"),
+                "has_update": True,
                 "next_try_at": now + RETRY_INTERVAL,
                 "message": "Gioco in esecuzione: aggiornamento rimandato.",
             }, home)
