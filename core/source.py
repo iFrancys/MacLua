@@ -182,73 +182,86 @@ def _missing_target_gids(manifests: dict, target_gids: dict) -> dict:
 
 
 def fetch_from_sources(appid: int, key=None, preferred_source="auto", auto_update=True, timeout=30, target_gids=None):
-    """Cerca e scarica da Sushi, Ryuu o Hubcap in base alla configurazione."""
+    """Cerca e scarica da Sushi, Ryuu o Hubcap in base alla configurazione.
+    Quando si cercano aggiornamenti (target_gids specificato), se la sorgente preferita
+    non possiede ancora il nuovo manifest, interroga automaticamente anche le altre
+    sorgenti disponibili unendo sia i manifest sia le chiavi depot."""
+    from core.lua import merge_lua
     appid = int(appid)
     source_used = None
     res = None
+
+    def _combine(cur, nxt, nxt_name):
+        nonlocal source_used
+        if cur is None:
+            source_used = nxt_name
+            return nxt
+        merged_mfs = dict(cur[1])
+        merged_mfs.update(nxt[1])
+        merged_lua = merge_lua(nxt[0], cur[0])
+        source_used = f"{source_used}+{nxt_name}" if source_used else nxt_name
+        return (merged_lua, merged_mfs)
 
     if preferred_source == "sushi":
         try:
             res = fetch_from_sushi(appid, timeout=timeout)
             source_used = "Sushi"
         except Exception as e:
-            raise ValueError(f"Sorgente Sushi: {e}")
+            if not target_gids:
+                raise ValueError(f"Sorgente Sushi: {e}")
 
     elif preferred_source == "ryuu":
         try:
             res = fetch_from_ryuu(appid, timeout=timeout)
             source_used = "Ryuu"
         except Exception as e:
-            raise ValueError(f"Sorgente Ryuu: {e}")
+            if not target_gids:
+                raise ValueError(f"Sorgente Ryuu: {e}")
 
     elif preferred_source == "hubcap":
-        if not key:
+        if not key and not target_gids:
             raise ValueError("Per la sorgente Hubcap è necessaria una chiave API")
-        url = f"{HUBCAP}/api/v1/manifest/{appid}?{urllib.parse.urlencode({'api_key': key})}"
-        res = _safe_extract(_download(url, timeout=timeout), appid)
-        source_used = "Hubcap"
-
-    else:  # "auto": Sushi -> Ryuu -> Hubcap
-        # 1. Prova prima Sushi (veloce, GitHub CDN, gratuito)
-        try:
-            res = fetch_from_sushi(appid, timeout=15)
-            source_used = "Sushi"
-        except Exception:
-            pass
-
-        # 2. Se non presente su Sushi (o se mancano i manifest target_gids), prova Ryuu
-        need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
-        if need_more:
-            try:
-                if check_ryuu(appid, timeout=8):
-                    ryuu_res = fetch_from_ryuu(appid, timeout=timeout)
-                    if res is None:
-                        res = ryuu_res
-                        source_used = "Ryuu"
-                    else:
-                        merged = dict(res[1])
-                        merged.update(ryuu_res[1])
-                        res = (ryuu_res[0], merged)
-                        source_used = f"{source_used}+Ryuu"
-            except Exception:
-                pass
-
-        # 3. Se ancora assente (o mancano target_gids) e l'utente ha configurato una chiave Hubcap, prova Hubcap
-        need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
-        if need_more and key:
+        if key:
             try:
                 url = f"{HUBCAP}/api/v1/manifest/{appid}?{urllib.parse.urlencode({'api_key': key})}"
-                hc_res = _safe_extract(_download(url, timeout=timeout), appid)
-                if res is None:
-                    res = hc_res
-                    source_used = "Hubcap"
-                else:
-                    merged = dict(res[1])
-                    merged.update(hc_res[1])
-                    res = (hc_res[0], merged)
-                    source_used = f"{source_used}+Hubcap"
+                res = _safe_extract(_download(url, timeout=timeout), appid)
+                source_used = "Hubcap"
             except Exception:
-                pass
+                if not target_gids:
+                    raise
+
+    if preferred_source == "auto" or target_gids:
+        # 1. Prova Sushi (veloce, GitHub CDN, gratuito) se non già interrogato
+        if preferred_source != "sushi":
+            need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
+            if need_more:
+                try:
+                    s_res = fetch_from_sushi(appid, timeout=15)
+                    res = _combine(res, s_res, "Sushi")
+                except Exception:
+                    pass
+
+        # 2. Se non presente su Sushi (o se mancano i manifest target_gids), prova Ryuu
+        if preferred_source != "ryuu":
+            need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
+            if need_more:
+                try:
+                    if check_ryuu(appid, timeout=8):
+                        ryuu_res = fetch_from_ryuu(appid, timeout=timeout)
+                        res = _combine(res, ryuu_res, "Ryuu")
+                except Exception:
+                    pass
+
+        # 3. Se ancora assente (o mancano target_gids) e l'utente ha configurato una chiave Hubcap, prova Hubcap
+        if preferred_source != "hubcap":
+            need_more = (res is None) or bool(_missing_target_gids(res[1], target_gids))
+            if need_more and key:
+                try:
+                    url = f"{HUBCAP}/api/v1/manifest/{appid}?{urllib.parse.urlencode({'api_key': key})}"
+                    hc_res = _safe_extract(_download(url, timeout=timeout), appid)
+                    res = _combine(res, hc_res, "Hubcap")
+                except Exception:
+                    pass
 
     if res is None:
         raise ValueError(f"Nessun manifest/lua trovato per appid {appid} sulle sorgenti disponibili (Sushi, Ryuu, Hubcap)")

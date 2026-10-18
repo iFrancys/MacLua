@@ -66,3 +66,28 @@ def parse_lua(text):
     keys = {k: v for k, v in keys.items() if k}
     manifests = {k: v for k, v in manifests.items() if k}
     return {"bare": bare, "keys": keys, "manifests": manifests}
+
+
+def merge_lua(primary_text, secondary_text):
+    """Unisce due file .lua preservando tutte le chiavi depot e gli addappid bare
+    presenti in secondary_text ma assenti in primary_text (es. unione Sushi + Hubcap)."""
+    if not secondary_text:
+        return primary_text
+    if not primary_text:
+        return secondary_text
+    p1 = parse_lua(primary_text)
+    p2 = parse_lua(secondary_text)
+    extra_lines = []
+    for dep in sorted(p2["keys"]):
+        if dep not in p1["keys"]:
+            extra_lines.append('addappid(%d, 1, "%s")' % (dep, p2["keys"][dep]))
+    covered = set(p1["bare"]) | set(p1["keys"]) | set(p2["keys"])
+    for aid in sorted(p2["bare"]):
+        if aid not in covered:
+            extra_lines.append("addappid(%d)" % aid)
+    if not extra_lines:
+        return primary_text
+    sep = "" if primary_text.endswith("\n") else "\n"
+    trail = "\n" if primary_text.endswith("\n") else ""
+    return primary_text + sep + "\n".join(extra_lines) + trail
+

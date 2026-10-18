@@ -72,6 +72,52 @@ def get_installed_buildid(steamapps_dir, appid, store_dir=None):
         return None
 
 
+def _has_newer_staged_manifest(appid, steamapps_dir, store_dir, depotcache_dir, target_gids):
+    """True se in store_dir/depotcache_dir esiste un manifest più recente (per creation_time)
+    rispetto a quello attualmente installato su disco per almeno un depot del gioco."""
+    from core import manifest as mf_mod
+    st = install.read_installed_state(store_dir, appid)
+    installed_map = {}
+    if st and isinstance(st.get("depots"), dict):
+        installed_map = {int(k): str(v) for k, v in st["depots"].items()}
+    else:
+        acf_path = os.path.join(steamapps_dir, f"appmanifest_{appid}.acf")
+        if os.path.exists(acf_path):
+            try:
+                with open(acf_path, "r", encoding="utf-8", errors="replace") as f:
+                    installed_map = install.installed_gids(f.read())
+            except Exception:
+                installed_map = {}
+    if not installed_map:
+        return False
+
+    for dep in target_gids:
+        cur_gid = installed_map.get(int(dep))
+        if not cur_gid:
+            continue
+        try:
+            best_path = install.resolve_manifest(store_dir, depotcache_dir, int(dep))
+            best_info = mf_mod.parse_manifest(best_path)
+            best_gid = str(best_info.get("gid") or "")
+            best_ct = int(best_info.get("creation_time") or 0)
+        except Exception:
+            continue
+        if not best_gid or best_gid == str(cur_gid):
+            continue
+        cur_ct = 0
+        for d in (store_dir, depotcache_dir):
+            cand = os.path.join(d, f"{int(dep)}_{cur_gid}.manifest")
+            if os.path.exists(cand):
+                try:
+                    cur_ct = int(mf_mod.parse_manifest(cand).get("creation_time") or 0)
+                except Exception:
+                    cur_ct = 0
+                break
+        if best_ct > cur_ct and cur_ct > 0:
+            return True
+    return False
+
+
 def check_updates(appid, home=None):
     """Verifica se per un appid è disponibile un aggiornamento di gioco o nuovi DLC."""
     home = home or os.path.expanduser("~")
@@ -128,7 +174,7 @@ def check_updates(appid, home=None):
                 os.path.exists(os.path.join(store_dir, f"{dep}_{gid}.manifest"))
                 or os.path.exists(os.path.join(depotcache_dir, f"{dep}_{gid}.manifest"))
                 for dep, gid in missing_gids.items()
-            )
+            ) or _has_newer_staged_manifest(appid, steamapps, store_dir, depotcache_dir, missing_gids)
         except Exception:
             pass
 
@@ -218,6 +264,7 @@ def apply_update(appid, home=None, workers=8, progress=None):
     # Verifica se i manifest necessari per la versione target sono effettivamente presenti
     store_dir = paths.sls_manifests(home)
     depotcache_dir = paths.depotcache(home)
+    steamapps_dir = paths.steamapps(home)
     missing_targets = []
     for dep, gid in target_gids.items():
         fname = f"{dep}_{gid}.manifest"
@@ -228,10 +275,11 @@ def apply_update(appid, home=None, workers=8, progress=None):
         ):
             missing_targets.append(dep)
 
-    # Se mancano i manifest della nuova versione pubblica e non sono stati scaricati
-    if missing_targets:
+    # Se mancano i manifest della nuova versione pubblica e non c'è nemmeno un manifest
+    # intermedio più recente rispetto a quello già installato su disco
+    if missing_targets and not _has_newer_staged_manifest(appid, steamapps_dir, store_dir, depotcache_dir, target_gids):
         pub_b = ai.public_buildid(appid)
-        cur_b = get_installed_buildid(paths.steamapps(home), appid, store_dir=store_dir)
+        cur_b = get_installed_buildid(steamapps_dir, appid, store_dir=store_dir)
         return {
             "ok": False,
             "error": f"L'aggiornamento alla build {pub_b} non è ancora disponibile nelle sorgenti pubbliche (in attesa di pubblicazione su Sushi/Hubcap). I file di gioco correnti (build {cur_b}) sono intatti e pienamente funzionanti.",
@@ -333,6 +381,63 @@ def request_update(appid, home=None, background=True):
     return _apply_locked(appid, home)
 
 
+def _sync_uninstalled_game(appid, home, now=None):
+    """Per i giochi presenti nella sezione LUA ma non ancora scaricati:
+    se mancano i manifest live su disco o nuovi DLC nel .lua, sincronizza
+    automaticamente da Sushi/Ryuu/Hubcap unendo le chiavi depot."""
+    now = now or int(time.time())
+    st = get_status(appid, home) or {}
+    try:
+        if st.get("next_try_at") and int(st["next_try_at"]) > now:
+            return
+    except (TypeError, ValueError):
+        pass
+
+    store_dir = paths.sls_manifests(home)
+    depotcache_dir = paths.depotcache(home)
+    missing_gids = {}
+    try:
+        for d in (ai.depots(appid) or []):
+            if d.get("shared"):
+                continue
+            if str(d.get("oslist") or "").lower() not in ("macos", "osx", "mac", "macosx", ""):
+                continue
+            dep = int(d["id"])
+            gid = str(d.get("gid") or "")
+            if gid and not (
+                os.path.exists(os.path.join(store_dir, f"{dep}_{gid}.manifest"))
+                or os.path.exists(os.path.join(depotcache_dir, f"{dep}_{gid}.manifest"))
+            ):
+                missing_gids[dep] = gid
+    except Exception:
+        return
+
+    if not missing_gids:
+        return
+
+    try:
+        from core import config, settings, source, manifests as mf_stage
+        key = config.get_key(home) or settings.get("hubcap_key", "")
+        pref = settings.get("preferred_source", "auto")
+        fetched = source.fetch_from_sources(
+            appid,
+            key=key,
+            preferred_source=pref,
+            auto_update=True,
+            target_gids=missing_gids,
+        )
+        if fetched and fetched.get("manifests"):
+            install.import_lua(appid, fetched["lua"], fetched["manifests"], home)
+            mf_stage.stage_all(store_dir, depotcache_dir)
+    except Exception:
+        pass
+    set_status(appid, {
+        "status": "pending",
+        "checked_at": now,
+        "next_try_at": now + RETRY_INTERVAL,
+    }, home)
+
+
 def background_tick(home=None):
     """Watcher aggiornamenti: per ogni gioco gestito e installato controlla la
     build pubblica PICS; se c'è un aggiornamento e i manifest sono disponibili
@@ -350,9 +455,13 @@ def background_tick(home=None):
     except Exception:
         games = []
     for g in games:
-        if not g.get("installed"):
-            continue
         aid = int(g["appid"])
+        if not g.get("installed"):
+            try:
+                _sync_uninstalled_game(aid, home, now=now)
+            except Exception:
+                pass
+            continue
         st = get_status(aid, home) or {}
         try:
             if st.get("next_try_at") and int(st["next_try_at"]) > now:
@@ -408,4 +517,5 @@ def background_tick(home=None):
             pending.append(aid)
     return {"checked": checked, "applied": applied,
             "pending": pending, "errored": errori}
+
 

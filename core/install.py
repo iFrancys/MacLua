@@ -6,19 +6,31 @@ import time
 from core import depotkeys, fetch, manifest
 from core.atomic import atomic_write
 from core.fetch import DEFAULT_CDN_BASES
-from core.lua import parse_lua as _parse_lua
+from core.lua import parse_lua as _parse_lua, merge_lua as _merge_lua
 from core.manifests import valid_name as _valid_manifest_name
 from core import paths as _paths
 
 
-def import_lua(appid, lua_text, manifests, home):
-    """Valida e scrive lua + manifest nello stplug-in/store. Ritorna report."""
+def import_lua(appid, lua_text, manifests, home=None):
+    """Valida e scrive lua + manifest nello stplug-in/store.
+    Se esiste già un <appid>.lua locale (es. da Hubcap o Sushi), unisce le chiavi depot
+    e gli addappid così nessuna chiave (es. depot macOS o DLC) va mai persa cambiando sorgente."""
+    home = home or os.path.expanduser("~")
     parsed = _parse_lua(lua_text)
     if appid not in parsed["bare"] and appid not in parsed["keys"]:
         raise ValueError("il lua è per un'altra app, non %d" % appid)
     sp = _paths.stplug_in(home)
     os.makedirs(sp, exist_ok=True)
     dst = os.path.join(sp, "%d.lua" % appid)
+    if os.path.exists(dst):
+        try:
+            with open(dst, "r", encoding="utf-8", errors="replace") as f:
+                existing_lua = f.read()
+            ex_parsed = _parse_lua(existing_lua)
+            if appid in ex_parsed["bare"] or appid in ex_parsed["keys"]:
+                lua_text = _merge_lua(lua_text, existing_lua)
+        except OSError:
+            pass
     atomic_write(dst, lua_text, mode=0o600)
     store = _paths.sls_manifests(home)
     os.makedirs(store, exist_ok=True)

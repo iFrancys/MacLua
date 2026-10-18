@@ -174,3 +174,81 @@ def test_check_updates_fetches_missing_manifests_from_sources(tmp_path):
     assert info["has_update"] is True
     assert info["manifest_ready"] is True
 
+
+def test_merge_lua_combines_hubcap_and_sushi_keys():
+    """merge_lua preserva le chiavi presenti solo in Hubcap (es. depot macOS)
+    e aggiunge quelle nuove di Sushi (es. DLC) senza duplicati."""
+    from core import lua
+    ka, kb, kc = "a" * 64, "b" * 64, "c" * 64
+    hubcap_lua = (
+        f'addappid(1671210)\n'
+        f'addappid(1671212, 1, "{ka}")\n'
+        f'addappid(1671213, 1, "{kb}")\n'
+    )
+    sushi_lua = (
+        f'addappid(1671210)\n'
+        f'addappid(1671212, 1, "{ka}")\n'
+        f'addappid(322660, 1, "{kc}")\n'
+    )
+    merged = lua.merge_lua(sushi_lua, hubcap_lua)
+    parsed = lua.parse_lua(merged)
+    assert parsed["keys"] == {1671212: ka, 1671213: kb, 322660: kc}
+    assert 1671210 in parsed["bare"]
+
+
+def test_import_lua_merges_with_existing_stplugin_file(tmp_path):
+    """import_lua non deve sovrascrivere e perdere chiavi già presenti in
+    stplug-in/<appid>.lua quando si importa da un'altra sorgente."""
+    home = str(tmp_path)
+    import os
+    from core import install, lua, paths
+    ka, kb = "a" * 64, "b" * 64
+    st = paths.stplug_in(home)
+    os.makedirs(st, exist_ok=True)
+    existing = (
+        f'addappid(1671210)\n'
+        f'addappid(1671212, 1, "{ka}")\n'
+        f'addappid(1671213, 1, "{kb}")\n'
+    )
+    with open(os.path.join(st, "1671210.lua"), "w") as f:
+        f.write(existing)
+
+    sushi_only_win = (
+        f'addappid(1671210)\n'
+        f'addappid(1671212, 1, "{ka}")\n'
+    )
+    install.import_lua(1671210, sushi_only_win, {}, home=home)
+
+    with open(os.path.join(st, "1671210.lua")) as f:
+        parsed = lua.parse_lua(f.read())
+    assert parsed["keys"] == {1671212: ka, 1671213: kb}
+
+
+def test_fetch_from_sources_falls_back_across_sources_for_target_gids(tmp_path):
+    """Se Sushi ha un manifest vecchio, fetch_from_sources con target_gids deve
+    provare anche le altre sorgenti (es. Hubcap/Ryuu) e unire i .lua."""
+    from core import lua, source
+    ka, kb = "a" * 64, "b" * 64
+    sushi_res = (
+        f'addappid(322170)\naddappid(322172, 1, "{ka}")\n',
+        {"322172_111.manifest": b"OLD"},
+    )
+    hubcap_res = (
+        f'addappid(322170)\naddappid(322172, 1, "{ka}")\naddappid(322173, 1, "{kb}")\n',
+        {"322172_222.manifest": b"NEW"},
+    )
+    with patch("core.source.fetch_from_sushi", return_value=sushi_res), \
+         patch("core.source.check_ryuu", return_value=False), \
+         patch("core.source._download", return_value=b"ZIP"), \
+         patch("core.source._safe_extract", return_value=hubcap_res):
+        res = source.fetch_from_sources(
+            322170,
+            key="fake_key",
+            preferred_source="sushi",
+            target_gids={322172: "222"},
+        )
+    assert res is not None
+    assert "322172_222.manifest" in res["manifests"]
+    assert "322172_111.manifest" in res["manifests"]
+    parsed = lua.parse_lua(res["lua"])
+    assert parsed["keys"] == {322172: ka, 322173: kb}
